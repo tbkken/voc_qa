@@ -1,0 +1,13 @@
+{
+  "id": "BUG-003",
+  "date": "2026-04-23",
+  "title": "洞察总结输出推理过程，缺乏专业 VoC 分析视角",
+  "severity": "P2",
+  "classification": "B",
+  "spec": "SPEC-001",
+  "ac": ["AC-15"],
+  "root_cause": "AC-15 未规定 prompt 须以专业 VoC 分析专家角色出发，system prompt 质量不足导致推理模型输出思考过程而非高管报告结论",
+  "affected_files": ["app/llm.py", "docs/spec/SPEC-001-insight-analysis.md"],
+  "fix_summary": "重写 stream_insight_summary system prompt 为资深 VoC 专家角色，禁止推理过程和引言，要求具体数据支撑；AC-15 补充专家视角约束",
+  "resolution": "full"
+}

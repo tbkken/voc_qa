@@ -1,0 +1,13 @@
+{
+  "id": "BUG-002",
+  "date": "2026-04-23",
+  "title": "think 标签渗漏到 UI",
+  "severity": "P2",
+  "classification": "A",
+  "spec": "SPEC-001",
+  "ac": ["AC-16"],
+  "root_cause": "_chat_stream 和 _stream_chat_chunks 均未过滤推理模型输出的 <think>...</think> 块",
+  "affected_files": ["app/llm.py"],
+  "fix_summary": "非流式路径用 re.sub 剥离；新增 _strip_think_tags 流式状态机过滤器包装 _stream_chat_chunks",
+  "resolution": "code_only"
+}
