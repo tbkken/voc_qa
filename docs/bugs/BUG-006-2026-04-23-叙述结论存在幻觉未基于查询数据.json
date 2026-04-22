@@ -1,0 +1,13 @@
+{
+  "id": "BUG-006",
+  "date": "2026-04-23",
+  "title": "LLM 叙述结论存在幻觉，未严格基于查询结果数据",
+  "severity": "P0",
+  "classification": "B",
+  "spec": "SPEC-001",
+  "ac": ["AC-25"],
+  "root_cause": "narrate_result prompt 未禁止幻觉；stream_insight_summary 只传前3行首尾列摘要，数据信息丢失",
+  "affected_files": ["app/llm.py", "docs/spec/SPEC-001-insight-analysis.md"],
+  "fix_summary": "narrate_result 强化 prompt 禁止幻觉+降温；stream_insight_summary 改传完整表格（最多20行含列头）；新增 AC-25",
+  "resolution": "full"
+}

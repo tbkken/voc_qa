@@ -187,15 +187,23 @@ class LlmClient:
 
     def narrate_result(self, question: str, sql: str,
                        result: dict[str, Any]) -> str:
-        """SQL 查询结果 -> 给人读的自然语言总结。"""
+        """SQL 查询结果 -> 给人读的自然语言总结。严格基于表格数据，禁止幻觉。"""
         preview = _result_to_compact_text(result, max_rows=20)
-        # 精简 prompt:不传 SQL(对解读没用)、指令更短
-        system = "你是数据分析助手。用不超过 150 字的中文总结查询结果:首句结论,引用 TOP1/TOP2 具体数字,点出异常。不要复述问题,不要解释 SQL。"
+        row_count = result.get("row_count", 0)
+        system = (
+            "你是数据分析助手。根据下方【查询结果表格】写一段不超过 150 字的中文总结。\n\n"
+            "硬性要求：\n"
+            "- 所有数字、排名、占比必须直接引用表格中的原始数值，严禁凭经验或常识编造\n"
+            "- 首句给出核心结论，引用表格中 TOP1/TOP2 的具体数值\n"
+            f"- 表格共 {row_count} 行；若为 0 行，只说"未查询到符合条件的数据"，不给任何推断\n"
+            "- 严禁使用"通常"、"一般"、"可能"、"预计"、"往往"等推测性表述\n"
+            "- 不复述问题，不解释 SQL"
+        )
         messages = [
             {"role": "system", "content": system},
-            {"role": "user", "content": f"问题: {question}\n\n结果:\n{preview}"},
+            {"role": "user", "content": f"问题: {question}\n\n【查询结果表格】\n{preview}"},
         ]
-        return self._chat(messages, temperature=0.3)
+        return self._chat(messages, temperature=0.1)
 
     def parse_insight_intent(self, question: str) -> dict:
         """用 LLM 从用户输入中提取背景条件和数据需求列表。
@@ -272,25 +280,31 @@ class LlmClient:
         for idx, item in enumerate(successful_items, 1):
             query = item.get("query", f"分析{idx}")
             narration = item.get("narration", "")
-            rows = item.get("rows", [])[:3]
+            rows = item.get("rows", [])
             cols = item.get("columns", [])
-            data_snippet = ""
-            if rows and cols:
-                data_snippet = "；".join(
-                    f"{r[0]}={r[-1]}" for r in rows if len(r) >= 2
-                )
+            # 传入完整表格（最多 20 行），确保总结 LLM 能看到真实数据
+            table_text = ""
+            if cols and rows:
+                header = " | ".join(cols)
+                data_lines = [header, "-" * len(header)]
+                for r in rows[:20]:
+                    data_lines.append(" | ".join(str(v) if v is not None else "" for v in r))
+                if len(rows) > 20:
+                    data_lines.append(f"... 共 {len(rows)} 行，已截断")
+                table_text = "\n".join(data_lines)
             parts.append(
                 f"【第{idx}项：{query}】\n"
-                f"结论：{narration}"
-                + (f"\n核心数据：{data_snippet}" if data_snippet else "")
+                f"叙述：{narration}"
+                + (f"\n原始数据：\n{table_text}" if table_text else "\n（无数据）")
             )
 
         system = (
             "你是资深用户声量（VoC）分析专家，正在为管理层撰写洞察报告。\n\n"
-            "请基于以下各维度数据，直接输出 3~5 个核心洞察观点。\n\n"
+            "请基于以下各维度的【原始数据表格】，直接输出 3~5 个核心洞察观点。\n\n"
             "格式（每个观点独立成段，段间空一行）：\n"
             "「观点标题」：核心结论一句话，引用具体数值/占比/排名佐证。\n\n"
             "硬性要求：\n"
+            "- 所有引用的数字必须来自下方原始数据，严禁凭先验知识编造\n"
             "- 每个结论必须有具体数据支撑，禁止模糊表述\n"
             "- 语言专业简洁，高管报告风格\n"
             "- 直接从第一个「观点」开始输出，禁止任何引言、推理过程、<think> 内容和收尾总结\n\n"
