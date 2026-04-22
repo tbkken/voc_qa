@@ -163,7 +163,10 @@ class LlmClient:
                     if c:
                         content_parts.append(c)
 
-        return "".join(content_parts)
+        result = "".join(content_parts)
+        # Strip <think>...</think> blocks emitted by reasoning models (DeepSeek-R1, QwQ, etc.)
+        result = re.sub(r"<think>.*?</think>", "", result, flags=re.DOTALL).strip()
+        return result
 
     # ============ 公开接口 ============
     def generate_sql(self, question: str) -> str:
@@ -217,19 +220,21 @@ class LlmClient:
             )
 
         system = (
-            "你是数据洞察专家，根据以下多维度分析数据，提炼 3~5 个核心洞察观点。\n\n"
-            "格式要求：\n"
-            "- 每个洞察点独立成段\n"
-            "- 格式：「观点标题」：一句结论，引用具体数字佐证\n"
-            "- 观点清晰有结论性，不泛泛而谈\n"
-            "- 直接输出洞察内容，不要引言\n\n"
+            "你是资深用户声量（VoC）分析专家，正在为管理层撰写洞察报告。\n\n"
+            "请基于以下各维度数据，直接输出 3~5 个核心洞察观点。\n\n"
+            "格式（每个观点独立成段，段间空一行）：\n"
+            "「观点标题」：核心结论一句话，引用具体数值/占比/排名佐证。\n\n"
+            "硬性要求：\n"
+            "- 每个结论必须有具体数据支撑，禁止模糊表述\n"
+            "- 语言专业简洁，高管报告风格\n"
+            "- 直接从第一个「观点」开始输出，禁止任何引言、推理过程、<think> 内容和收尾总结\n\n"
             "数据来源：\n" + "\n\n".join(parts)
         )
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": f"背景：{background or '全量数据'}。请提炼核心洞察。"},
         ]
-        yield from self._stream_chat_chunks(messages, temperature=0.4)
+        yield from _strip_think_tags(self._stream_chat_chunks(messages, temperature=0.4))
 
     def _stream_chat_chunks(self, messages: list, temperature: float = 0.3) -> Iterator[str]:
         """流式调用 LLM，逐 token 块 yield 文本。"""
@@ -356,6 +361,40 @@ def _result_to_compact_text(result: dict, max_rows: int = 20) -> str:
         lines.append(f"... (共 {result['row_count']} 行,已截断)")
     return "\n".join(lines)
 
+
+
+def _strip_think_tags(chunks: Iterator[str]) -> Iterator[str]:
+    """Filter out <think>...</think> blocks from a streaming chunk iterator.
+
+    Handles tags split across multiple chunks with a state-machine buffer.
+    """
+    buffer = ""
+    in_think = False
+    for chunk in chunks:
+        buffer += chunk
+        while True:
+            if not in_think:
+                start = buffer.find("<think>")
+                if start == -1:
+                    # No opening tag — safe to yield everything except a partial-tag tail
+                    safe_len = max(0, len(buffer) - len("<think>"))
+                    if safe_len:
+                        yield buffer[:safe_len]
+                        buffer = buffer[safe_len:]
+                    break
+                if start > 0:
+                    yield buffer[:start]
+                buffer = buffer[start:]
+                in_think = True
+            else:
+                end = buffer.find("</think>")
+                if end == -1:
+                    break  # Still inside <think>, wait for more chunks
+                buffer = buffer[end + len("</think>"):]
+                in_think = False
+    # Flush remaining content (only if not inside an unclosed <think>)
+    if buffer and not in_think:
+        yield buffer
 
 
 def _parse_insight_by_rules(question: str) -> dict:
