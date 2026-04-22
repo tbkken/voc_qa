@@ -127,22 +127,45 @@ class InsightPipeline:
         yield {"type": "all_done", "results": results}
 
 
+def _is_numeric(val) -> bool:
+    if val is None:
+        return False
+    try:
+        float(val)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
 def _suggest_chart(sql: str, data: dict) -> str:
-    """简单规则推荐图表类型。"""
+    """根据结果结构推荐图表类型：metric / line / pie / bar / table / none。"""
     rows = data["rows"]
     cols = data["columns"]
     if not rows or not cols:
         return "none"
-    if len(rows) == 1 and len(cols) == 1:
-        return "metric"
-    if len(cols) >= 2:
-        # 时间维度用折线
-        first_col = cols[0].lower()
-        if any(k in first_col for k in ("month", "date", "pt_d", "day", "week", "time")):
-            return "line"
-        # 其它 TOP 榜用柱状
-        if len(rows) <= 30:
-            return "bar"
+
+    # ── 单列 ──────────────────────────────────────────
+    if len(cols) == 1:
+        # 1行1列数字 → 大数字卡片
+        if len(rows) == 1 and _is_numeric(rows[0][0]):
+            return "metric"
+        # 全部非数字（原声评论、关键词等纯文本）→ 仅表格
+        if all(not _is_numeric(r[0]) for r in rows):
+            return "table"
+        # 单列多行数字 → 表格
+        return "table"
+
+    # ── 多列 ──────────────────────────────────────────
+    first_col = cols[0].lower()
+    # 时间维度 → 折线
+    if any(k in first_col for k in ("month", "date", "pt_d", "day", "week", "time")):
+        return "line"
+    # 2列 + ≤8行 + 末列为数字 → 饼图（整体/局部关系）
+    if len(cols) == 2 and len(rows) <= 8 and _is_numeric(rows[0][-1]):
+        return "pie"
+    # 其他分类数据 ≤30行 → 竖柱状
+    if len(rows) <= 30:
+        return "bar"
     return "table"
 
 

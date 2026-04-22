@@ -721,33 +721,75 @@ function renderAssistantMessage(data) {
 function renderChart(containerId, data) {
   const el = document.getElementById(containerId);
   if (!el) return;
-  const chart = echarts.init(el, null, { renderer: 'canvas' });
 
   const cols = data.data.columns;
   const rows = data.data.rows;
   const hint = data.chart_hint;
 
-  // 单值 metric - 用大数字卡片代替图表
+  // 无图场景：隐藏容器，让表格/叙述直接顶上
+  if (!hint || hint === 'none' || hint === 'table') {
+    el.style.display = 'none';
+    return;
+  }
+
+  const chart = echarts.init(el, null, { renderer: 'canvas' });
+
+  // ── metric：大数字卡片 ──────────────────────────────
   if (hint === 'metric' || (rows.length === 1 && cols.length === 1)) {
     el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;">
       <div style="text-align:center">
-        <div style="font-family: var(--serif); font-size: 64px; color: var(--red); font-weight: 300;">
+        <div style="font-family:var(--serif);font-size:64px;color:var(--red);font-weight:300;">
           ${Number(rows[0][0]).toLocaleString()}
         </div>
-        <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.2em; margin-top: 8px;">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.2em;margin-top:8px;">
           ${cols[0]}
         </div>
       </div></div>`;
     return;
   }
 
+  // ── pie：饼图（整体/局部关系）────────────────────────
+  if (hint === 'pie') {
+    const pieData = rows.map(r => ({
+      name: String(r[0]),
+      value: Number(r[cols.length - 1]) || 0
+    }));
+    chart.setOption({
+      backgroundColor: 'transparent',
+      tooltip: {
+        trigger: 'item',
+        backgroundColor: '#0d1117',
+        borderColor: '#30363d',
+        textStyle: { color: '#e8e0d5', fontSize: 12 },
+        formatter: '{b}: {c} ({d}%)'
+      },
+      legend: {
+        orient: 'vertical',
+        right: '5%',
+        top: 'center',
+        textStyle: { color: '#c9d1d9', fontSize: 11 }
+      },
+      series: [{
+        type: 'pie',
+        radius: '65%',
+        center: ['40%', '50%'],
+        data: pieData,
+        label: { color: '#e8e0d5', fontSize: 10, formatter: '{b}\n{d}%' },
+        itemStyle: { borderColor: '#0d1117', borderWidth: 2 }
+      }]
+    });
+    new ResizeObserver(() => chart.resize()).observe(el);
+    return;
+  }
+
+  // ── line / bar：折线 & 竖柱状 ────────────────────────
   const labels = rows.map(r => String(r[0]));
   const valueColIdx = cols.length - 1;
   const values = rows.map(r => Number(r[valueColIdx]) || 0);
 
   const baseOption = {
     backgroundColor: 'transparent',
-    grid: { left: 100, right: 30, top: 20, bottom: 40 },
+    grid: { left: 50, right: 20, top: 20, bottom: hint === 'bar' ? 65 : 40 },
     tooltip: {
       trigger: 'axis',
       backgroundColor: '#0d1117',
@@ -755,19 +797,23 @@ function renderChart(containerId, data) {
       textStyle: { color: '#e8e0d5', fontSize: 12 }
     },
     xAxis: {
-      type: hint === 'bar' ? 'value' : 'category',
-      data: hint === 'bar' ? undefined : labels,
+      type: 'category',
+      data: labels,
       axisLine: { lineStyle: { color: '#30363d' } },
-      axisLabel: { color: '#8b949e', fontSize: 10 },
-      splitLine: { lineStyle: { color: 'rgba(120, 110, 100, 0.15)' } }
+      axisLabel: {
+        color: '#8b949e', fontSize: 10,
+        rotate: hint === 'bar' ? 45 : 0,
+        interval: 0,
+        overflow: 'truncate',
+        width: hint === 'bar' ? 80 : undefined
+      },
+      splitLine: { show: false }
     },
     yAxis: {
-      type: hint === 'bar' ? 'category' : 'value',
-      data: hint === 'bar' ? labels : undefined,
-      inverse: hint === 'bar',
+      type: 'value',
       axisLine: { lineStyle: { color: '#30363d' } },
       axisLabel: { color: '#c9d1d9', fontSize: 11 },
-      splitLine: { lineStyle: { color: 'rgba(120, 110, 100, 0.15)' } }
+      splitLine: { lineStyle: { color: 'rgba(120,110,100,0.15)' } }
     },
   };
 
@@ -789,20 +835,21 @@ function renderChart(containerId, data) {
       }]
     });
   } else {
+    // bar：竖向柱状，渐变从下到上
     chart.setOption({
       ...baseOption,
       series: [{
         type: 'bar',
         data: values,
         itemStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
-            { offset: 0, color: '#8b0a20' },
-            { offset: 1, color: '#c7102e' }
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: '#c7102e' },
+            { offset: 1, color: '#8b0a20' }
           ])
         },
         label: {
           show: true,
-          position: hint === 'bar' ? 'right' : 'top',
+          position: 'top',
           color: '#e8e0d5',
           fontSize: 10,
           formatter: '{c}'
@@ -811,7 +858,6 @@ function renderChart(containerId, data) {
     });
   }
 
-  // 响应式
   new ResizeObserver(() => chart.resize()).observe(el);
 }
 
