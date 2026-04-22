@@ -381,10 +381,6 @@ const chipsEl = document.getElementById('chips');
 let loading = false;
 let msgCount = 0;
 
-const INSIGHT_TRIGGERS = ['洞察', '分析以下', '分析如下', '数据洞察'];
-function isInsightQuestion(q) {
-  return INSIGHT_TRIGGERS.some(t => q.includes(t));
-}
 
 // ============ Init ============
 (async () => {
@@ -435,20 +431,7 @@ async function ask(question) {
   sendBtn.disabled = true;
 
   try {
-    if (isInsightQuestion(question)) {
-      await askInsight(question);
-    } else {
-      const loadingEl = renderLoading();
-      const res = await fetch(`${API_BASE}/api/ask`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question })
-      });
-      const data = await res.json();
-      loadingEl.remove();
-      renderAssistantMessage(data);
-      chatEl.scrollTop = chatEl.scrollHeight;
-    }
+    await askInsight(question);
   } catch (e) {
     renderErrorMessage('请求失败: ' + e.message);
   } finally {

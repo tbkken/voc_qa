@@ -199,48 +199,12 @@ class LlmClient:
         return self._chat(messages, temperature=0.3)
 
     def parse_insight_intent(self, question: str) -> dict:
-        """判断是否为洞察分析意图，解析 background 与 items 列表。
+        """从问题中解析背景与数据需求列表（纯规则，无 LLM 调用，不会失败）。
 
-        Returns: {is_insight, background, items}
+        - 含列表触发词（分析以下/如下 + 分隔符）→ 拆分多条 items
+        - 普通单问题 → items=[question]（单条洞察）
         """
-        if self.cfg.mock:
-            return _mock_parse_insight(question)
-
-        import json as _json
-
-        system = (
-            "判断用户输入是否为「洞察分析」请求，返回 JSON（不加代码块标记）。\n"
-            "洞察分析特征：含「洞察」/「数据洞察」/「分析以下」/「分析如下」等触发词，且有多个具体分析需求。\n"
-            "格式：{\"is_insight\":true/false,\"background\":\"背景条件(无则空串)\","
-            "\"items\":[\"需求1\",\"需求2\"]}\n"
-            "非洞察请求返回：{\"is_insight\":false,\"background\":\"\",\"items\":[]}"
-        )
-        messages = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": question},
-        ]
-        url = self.cfg.base_url.rstrip("/") + "/chat/completions"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.cfg.api_key}",
-        }
-        payload = {"model": self.cfg.model, "messages": messages, "temperature": 0.0}
-        trust_env = self.cfg.use_proxy
-
-        try:
-            with httpx.Client(timeout=30.0, trust_env=trust_env) as client:
-                r = client.post(url, headers=headers, json=payload)
-                r.raise_for_status()
-                raw = r.json()["choices"][0]["message"]["content"]
-            clean = re.sub(r"```(?:json)?\s*|\s*```", "", raw.strip()).strip()
-            result = _json.loads(clean)
-            return {
-                "is_insight": bool(result.get("is_insight", False)),
-                "background": str(result.get("background", "")),
-                "items": [s.strip() for s in result.get("items", []) if str(s).strip()],
-            }
-        except Exception:
-            return {"is_insight": False, "background": "", "items": []}
+        return _parse_insight_by_rules(question)
 
     def stream_insight_summary(self, background: str, successful_items: list) -> Iterator[str]:
         """生成洞察总结，流式 yield 文本块。"""
@@ -441,28 +405,33 @@ FROM fact_voc WHERE emotion = '负向声量'
 GROUP BY fifth_category ORDER BY cnt DESC LIMIT 10"""
 
 
-def _mock_parse_insight(question: str) -> dict:
-    TRIGGERS = ["洞察", "分析以下", "分析如下", "数据洞察"]
-    if not any(t in question for t in TRIGGERS):
-        return {"is_insight": False, "background": "", "items": []}
+def _parse_insight_by_rules(question: str) -> dict:
+    """纯规则解析洞察意图，无 LLM 调用，始终返回 is_insight=True。
+
+    含列表触发词 → 拆分多条 items；普通问题 → items=[question]。
+    """
+    SPLIT_TRIGGERS = [
+        "分析以下细节：", "分析以下细节:", "分析以下：", "分析以下:",
+        "分析如下细节：", "分析如下：", "分析如下:", "需要分析：", "需要分析:",
+    ]
 
     bg = ""
-    m = re.search(r"对\s*(.{2,20}?)\s*(?:的数据)?[，,]", question)
-    if m:
-        bg = m.group(1)
-
     items: list[str] = []
-    for trigger in ["分析以下细节：", "分析以下细节:", "分析以下：", "分析以下:",
-                    "分析如下细节：", "分析如下：", "分析如下:", "：", ":"]:
+
+    for trigger in SPLIT_TRIGGERS:
         if trigger in question:
-            rest = question.split(trigger, 1)[1]
-            candidates = [x.strip() for x in re.split(r"[,，、；;\n]", rest) if x.strip()]
-            if candidates:
-                items = candidates
-                break
+            before, after = question.split(trigger, 1)
+            m = re.search(r"对\s*(.{2,30}?)\s*(?:做|进行|来|，|,)", before.strip())
+            bg = m.group(1).strip() if m else before.strip().rstrip("，,、 ")
+            raw_items = re.split(r"[,，、；;\n]|\d+[.、．]\s*", after.strip())
+            items = [x.strip() for x in raw_items if x.strip()]
+            break
 
     if not items:
-        items = ["整体声量分布", "负向声量 TOP 品类"]
+        m = re.search(r"对\s*(.{2,20}?)\s*(?:的数据)?[，,]", question)
+        bg = m.group(1).strip() if m else ""
+        items = [question.strip()]
+
     return {"is_insight": True, "background": bg, "items": items}
 
 

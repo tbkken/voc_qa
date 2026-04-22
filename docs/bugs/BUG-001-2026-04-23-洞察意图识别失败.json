@@ -1,0 +1,14 @@
+{
+  "id": "BUG-001",
+  "title": "洞察意图识别失败（LLM 解析静默返回 False）",
+  "date": "2026-04-23",
+  "severity": "P1",
+  "classification": "A",
+  "resolution": "full",
+  "spec": "SPEC-001",
+  "affected_ac": ["AC-01", "AC-06"],
+  "root_cause": "parse_insight_intent 依赖 LLM 调用识别意图，调用失败时 except Exception 静默返回 is_insight: False",
+  "fix_summary": "移除 LLM 意图识别，改为纯规则解析；前端所有问题统一走洞察 pipeline，单问题视为 1 条需求的洞察报告",
+  "files_changed": ["app/llm.py", "web/index.html"],
+  "related_spec_changes": ["SPEC-001 AC-01 updated", "SPEC-001 AC-06 updated"]
+}
