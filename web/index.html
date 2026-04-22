@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VoC · 自由问答</title>
+<link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,300;0,400;0,500;0,700;1,400&family=IBM+Plex+Sans+SC:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: rgba(120, 110, 100, 0.25);
+    --text: #e8e0d5;
+    --text-dim: #8b949e;
+    --text-muted: #5a5f66;
+    --red: #c7102e;
+    --red-dim: #8b0a20;
+    --amber: #d4a84b;
+    --green: #4a9d6b;
+    --serif: 'Crimson Pro', 'Noto Serif SC', Georgia, serif;
+    --sans: 'IBM Plex Sans SC', system-ui, sans-serif;
+    --mono: 'IBM Plex Mono', ui-monospace, monospace;
+  }
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    background-image:
+      radial-gradient(ellipse at top, rgba(199,16,46,0.05), transparent 50%),
+      radial-gradient(ellipse at bottom right, rgba(139,115,85,0.04), transparent 50%);
+  }
+  .font-serif { font-family: var(--serif); font-feature-settings: "liga", "dlig"; }
+  .font-mono { font-family: var(--mono); }
+
+  /* Layout */
+  .app { display: flex; flex-direction: column; height: 100vh; max-width: 1400px; margin: 0 auto; }
+  .nav {
+    position: sticky; top: 0; z-index: 10;
+    backdrop-filter: blur(12px);
+    background: rgba(13, 17, 23, 0.85);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 40px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .nav-left { display: flex; align-items: baseline; gap: 20px; }
+  .logo {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .logo-mark {
+    width: 20px; height: 20px; background: var(--red); transform: rotate(45deg);
+  }
+  .logo-text {
+    font-family: var(--serif);
+    font-size: 20px;
+    color: var(--text);
+    letter-spacing: 0.02em;
+  }
+  .logo-sub {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.3em;
+    color: var(--text-muted);
+  }
+  .nav-status {
+    font-size: 11px; color: var(--text-dim);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .status-dot { width: 6px; height: 6px; background: var(--green); border-radius: 50%; }
+
+  /* Main */
+  .main {
+    flex: 1; padding: 32px 40px; overflow: hidden;
+    display: flex; flex-direction: column; gap: 24px;
+  }
+  .header {
+    border-bottom: 1px solid var(--border); padding-bottom: 20px;
+  }
+  .header-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.3em;
+    color: var(--text-muted); margin-bottom: 8px;
+  }
+  .header-title {
+    font-family: var(--serif); font-size: 40px; color: var(--text); font-weight: 300;
+    letter-spacing: -0.01em; line-height: 1.1;
+  }
+  .header-title em { color: var(--red); font-style: italic; font-weight: 400; }
+  .header-desc {
+    font-size: 12px; color: var(--text-dim); margin-top: 8px;
+  }
+
+  /* Chat */
+  .chat { flex: 1; overflow-y: auto; padding-right: 8px; }
+  .chat::-webkit-scrollbar { width: 6px; }
+  .chat::-webkit-scrollbar-thumb { background: var(--border); }
+
+  .msg { margin-bottom: 28px; }
+  .msg-user {
+    display: flex; justify-content: flex-end;
+  }
+  .msg-user .bubble {
+    max-width: 640px;
+    background: rgba(80, 70, 60, 0.35);
+    border-left: 2px solid var(--amber);
+    padding: 12px 20px;
+  }
+  .msg-user .bubble-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.2em;
+    color: var(--text-muted); margin-bottom: 4px;
+  }
+  .msg-user .bubble-text { color: var(--text); font-size: 14px; }
+
+  .msg-system {
+    font-size: 12px; color: var(--text-muted); font-style: italic;
+    font-family: var(--serif);
+    border-left: 2px solid var(--border); padding: 8px 16px;
+  }
+
+  .msg-assistant { max-width: 860px; }
+  .msg-meta {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+  }
+  .msg-avatar {
+    width: 24px; height: 24px; border: 1px solid var(--red);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--red); font-size: 12px;
+  }
+  .msg-meta-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.2em;
+    color: var(--text-muted);
+  }
+  .msg-meta-timing {
+    margin-left: auto; font-size: 10px; color: var(--text-muted);
+    font-family: var(--mono);
+  }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    padding: 20px;
+  }
+  .card-answer {
+    font-family: var(--serif); font-size: 15px; color: var(--text);
+    line-height: 1.7; white-space: pre-wrap;
+  }
+
+  .card-section {
+    margin-top: 20px; padding-top: 20px;
+    border-top: 1px solid var(--border);
+  }
+  .card-section-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.2em;
+    color: var(--text-muted); margin-bottom: 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .chart-box { width: 100%; height: 280px; }
+
+  .data-table {
+    width: 100%; border-collapse: collapse; font-size: 12px;
+  }
+  .data-table th, .data-table td {
+    text-align: left; padding: 8px 12px;
+    border-bottom: 1px solid rgba(120, 110, 100, 0.15);
+  }
+  .data-table th {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--text-muted); font-weight: 500;
+  }
+  .data-table td { color: var(--text); }
+  .data-table td:nth-child(n+2) {
+    font-family: var(--mono); text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  details.sql-box { margin-top: 16px; }
+  details.sql-box summary {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.2em;
+    color: var(--text-muted); cursor: pointer; user-select: none;
+    padding: 4px 0;
+  }
+  details.sql-box summary:hover { color: var(--text-dim); }
+  details.sql-box pre {
+    margin-top: 8px; padding: 12px; background: rgba(0, 0, 0, 0.4);
+    font-family: var(--mono); font-size: 11px;
+    color: #f4d8a8; overflow-x: auto;
+    border-left: 2px solid var(--amber);
+  }
+
+  .error-box {
+    background: rgba(199, 16, 46, 0.1);
+    border: 1px solid rgba(199, 16, 46, 0.3);
+    padding: 16px; color: #f5a3af;
+    font-size: 13px;
+  }
+
+  .loading {
+    display: flex; align-items: center; gap: 10px;
+    color: var(--text-muted); font-size: 13px;
+    font-family: var(--serif); font-style: italic;
+  }
+  .loading-dot {
+    width: 6px; height: 6px; background: var(--red);
+    animation: pulse 1.4s infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+
+  /* Suggested questions */
+  .suggestions { margin-top: 16px; }
+  .suggestions-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.2em;
+    color: var(--text-muted); margin-bottom: 10px;
+  }
+  .suggestion-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    font-size: 12px; color: var(--text);
+    padding: 7px 14px;
+    background: rgba(120, 110, 100, 0.1);
+    border: 1px solid var(--border);
+    cursor: pointer; transition: all 0.2s;
+  }
+  .chip:hover {
+    background: rgba(199, 16, 46, 0.15);
+    border-color: rgba(199, 16, 46, 0.4);
+  }
+
+  /* Input */
+  .input-area {
+    border-top: 1px solid var(--border); padding-top: 16px;
+  }
+  .input-wrap {
+    display: flex; background: var(--surface);
+    border: 1px solid var(--border);
+    transition: border-color 0.2s;
+  }
+  .input-wrap:focus-within { border-color: rgba(199, 16, 46, 0.5); }
+  .input-wrap input {
+    flex: 1; background: transparent; border: none; outline: none;
+    color: var(--text); padding: 14px 18px; font-size: 14px;
+    font-family: var(--sans);
+  }
+  .input-wrap input::placeholder { color: var(--text-muted); }
+  .input-wrap button {
+    padding: 0 20px; background: var(--red); color: white; border: none;
+    cursor: pointer; font-size: 13px; font-family: var(--sans);
+    transition: background 0.2s;
+  }
+  .input-wrap button:hover:not(:disabled) { background: #a30e28; }
+  .input-wrap button:disabled { background: #3a3f46; cursor: not-allowed; }
+
+  /* Footer */
+  .footer {
+    border-top: 1px solid var(--border); padding: 16px 40px;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.15em;
+    color: var(--text-muted);
+    display: flex; justify-content: space-between;
+    max-width: 1400px; margin: 0 auto;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="nav">
+    <div class="nav-left">
+      <div class="logo">
+        <div class="logo-mark"></div>
+        <span class="logo-text">VoC Insight</span>
+      </div>
+      <span class="logo-sub">自由问答</span>
+    </div>
+    <div class="nav-status">
+      <span class="status-dot"></span>
+      <span id="statusText">连接中...</span>
+    </div>
+  </nav>
+
+  <div class="main">
+    <div class="header">
+      <div class="header-label">CONVERSATION · VOC DATA</div>
+      <h1 class="header-title"><em>自由</em> · 问答</h1>
+      <div class="header-desc">用自然语言直接提问,系统会生成 SQL 查询真实数据并用自然语言回答</div>
+    </div>
+
+    <div class="chat" id="chat">
+      <div class="msg">
+        <div class="msg-system">
+          你好,我是声量洞察助理。用自然语言提问即可,例如"最近哪类投诉增长最快"。
+        </div>
+      </div>
+    </div>
+
+    <div class="input-area">
+      <div class="suggestions" id="suggestions" style="display:none">
+        <div class="suggestions-label">建议的问题</div>
+        <div class="suggestion-chips" id="chips"></div>
+      </div>
+      <div style="height:12px"></div>
+      <div class="input-wrap">
+        <input id="input" type="text" placeholder="用自然语言提问..." autocomplete="off">
+        <button id="sendBtn">发送</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <span>Voice of Customer · 内部系统</span>
+    <span>FastAPI + DuckDB + LLM</span>
+    <span>V1.0</span>
+  </footer>
+</div>
+
+<script>
+const API_BASE = '';  // 同源部署
+const chatEl = document.getElementById('chat');
+const inputEl = document.getElementById('input');
+const sendBtn = document.getElementById('sendBtn');
+const statusText = document.getElementById('statusText');
+const suggestionsEl = document.getElementById('suggestions');
+const chipsEl = document.getElementById('chips');
+
+let loading = false;
+let msgCount = 0;
+
+// ============ Init ============
+(async () => {
+  try {
+    const [statsRes, sqRes, llmRes] = await Promise.all([
+      fetch(`${API_BASE}/api/stats`).then(r => r.json()),
+      fetch(`${API_BASE}/api/sample_questions`).then(r => r.json()),
+      fetch(`${API_BASE}/api/llm_status`).then(r => r.json()),
+    ]);
+
+    const llmTag = llmRes.mock
+      ? `<span style="color: var(--amber);">MOCK</span>`
+      : (llmRes.configured
+          ? `<span style="color: var(--green);">● ${llmRes.model}</span>`
+          : `<span style="color: var(--red);">✗ LLM 未配置</span>`);
+
+    statusText.innerHTML = `${llmTag} &nbsp;|&nbsp; ${statsRes.row_count.toLocaleString()} 条 · ${statsRes.date_range.min} → ${statsRes.date_range.max}`;
+
+    suggestionsEl.style.display = 'block';
+    chipsEl.innerHTML = '';
+    sqRes.questions.forEach(q => {
+      const chip = document.createElement('div');
+      chip.className = 'chip';
+      chip.textContent = q;
+      chip.onclick = () => ask(q);
+      chipsEl.appendChild(chip);
+    });
+  } catch (e) {
+    statusText.textContent = '连接失败';
+    statusText.style.color = 'var(--red)';
+  }
+})();
+
+// ============ Send ============
+inputEl.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !loading) ask(inputEl.value);
+});
+sendBtn.addEventListener('click', () => ask(inputEl.value));
+
+async function ask(question) {
+  question = (question || '').trim();
+  if (!question || loading) return;
+
+  // 隐藏建议
+  suggestionsEl.style.display = 'none';
+
+  renderUserMessage(question);
+  inputEl.value = '';
+  loading = true;
+  sendBtn.disabled = true;
+  const loadingEl = renderLoading();
+
+  try {
+    const res = await fetch(`${API_BASE}/api/ask`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question })
+    });
+    const data = await res.json();
+    loadingEl.remove();
+    renderAssistantMessage(data);
+  } catch (e) {
+    loadingEl.remove();
+    renderErrorMessage('请求失败: ' + e.message);
+  } finally {
+    loading = false;
+    sendBtn.disabled = false;
+    chatEl.scrollTop = chatEl.scrollHeight;
+  }
+}
+
+// ============ Render ============
+function renderUserMessage(text) {
+  const div = document.createElement('div');
+  div.className = 'msg msg-user';
+  div.innerHTML = `
+    <div class="bubble">
+      <div class="bubble-label">YOU</div>
+      <div class="bubble-text"></div>
+    </div>`;
+  div.querySelector('.bubble-text').textContent = text;
+  chatEl.appendChild(div);
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+function renderLoading() {
+  const div = document.createElement('div');
+  div.className = 'msg loading';
+  div.innerHTML = `
+    <div class="loading-dot"></div>
+    <span>正在生成 SQL 并执行查询...</span>`;
+  chatEl.appendChild(div);
+  chatEl.scrollTop = chatEl.scrollHeight;
+  return div;
+}
+
+function renderErrorMessage(text) {
+  const div = document.createElement('div');
+  div.className = 'msg msg-assistant';
+  div.innerHTML = `
+    <div class="msg-meta">
+      <div class="msg-avatar">!</div>
+      <span class="msg-meta-label">ERROR</span>
+    </div>
+    <div class="error-box"></div>`;
+  div.querySelector('.error-box').textContent = text;
+  chatEl.appendChild(div);
+}
+
+function renderAssistantMessage(data) {
+  const msgId = ++msgCount;
+  const div = document.createElement('div');
+  div.className = 'msg msg-assistant';
+
+  const hasError = data.error;
+  const hasData = data.data && data.data.rows && data.data.rows.length > 0;
+
+  div.innerHTML = `
+    <div class="msg-meta">
+      <div class="msg-avatar">✦</div>
+      <span class="msg-meta-label">ASSISTANT</span>
+      <span class="msg-meta-timing">${data.elapsed_ms} ms</span>
+    </div>
+    <div class="card">
+      ${hasError
+        ? `<div class="error-box">${escapeHtml(data.answer)}</div>`
+        : `<div class="card-answer">${escapeHtml(data.answer)}</div>`}
+      ${hasData ? `
+        <div class="card-section">
+          <div class="card-section-label">可视化结果 · ${data.data.row_count} 条</div>
+          <div id="chart-${msgId}" class="chart-box"></div>
+        </div>
+        <div class="card-section">
+          <div class="card-section-label">数据明细</div>
+          <div id="table-${msgId}" style="max-height: 240px; overflow-y: auto;"></div>
+        </div>` : ''}
+      ${data.sql ? `
+        <details class="sql-box">
+          <summary>查看生成的 SQL</summary>
+          <pre>${escapeHtml(data.sql)}</pre>
+        </details>` : ''}
+    </div>`;
+  chatEl.appendChild(div);
+
+  // 渲染图表和表格
+  if (hasData) {
+    renderChart(`chart-${msgId}`, data);
+    renderTable(`table-${msgId}`, data.data);
+  }
+}
+
+function renderChart(containerId, data) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const chart = echarts.init(el, null, { renderer: 'canvas' });
+
+  const cols = data.data.columns;
+  const rows = data.data.rows;
+  const hint = data.chart_hint;
+
+  // 单值 metric - 用大数字卡片代替图表
+  if (hint === 'metric' || (rows.length === 1 && cols.length === 1)) {
+    el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;">
+      <div style="text-align:center">
+        <div style="font-family: var(--serif); font-size: 64px; color: var(--red); font-weight: 300;">
+          ${Number(rows[0][0]).toLocaleString()}
+        </div>
+        <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.2em; margin-top: 8px;">
+          ${cols[0]}
+        </div>
+      </div></div>`;
+    return;
+  }
+
+  const labels = rows.map(r => String(r[0]));
+  const valueColIdx = cols.length - 1;
+  const values = rows.map(r => Number(r[valueColIdx]) || 0);
+
+  const baseOption = {
+    backgroundColor: 'transparent',
+    grid: { left: 100, right: 30, top: 20, bottom: 40 },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: '#0d1117',
+      borderColor: '#30363d',
+      textStyle: { color: '#e8e0d5', fontSize: 12 }
+    },
+    xAxis: {
+      type: hint === 'bar' ? 'value' : 'category',
+      data: hint === 'bar' ? undefined : labels,
+      axisLine: { lineStyle: { color: '#30363d' } },
+      axisLabel: { color: '#8b949e', fontSize: 10 },
+      splitLine: { lineStyle: { color: 'rgba(120, 110, 100, 0.15)' } }
+    },
+    yAxis: {
+      type: hint === 'bar' ? 'category' : 'value',
+      data: hint === 'bar' ? labels : undefined,
+      inverse: hint === 'bar',
+      axisLine: { lineStyle: { color: '#30363d' } },
+      axisLabel: { color: '#c9d1d9', fontSize: 11 },
+      splitLine: { lineStyle: { color: 'rgba(120, 110, 100, 0.15)' } }
+    },
+  };
+
+  if (hint === 'line') {
+    chart.setOption({
+      ...baseOption,
+      series: [{
+        type: 'line',
+        data: values,
+        smooth: true,
+        lineStyle: { color: '#c7102e', width: 2 },
+        itemStyle: { color: '#c7102e' },
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(199,16,46,0.4)' },
+            { offset: 1, color: 'rgba(199,16,46,0.02)' }
+          ])
+        }
+      }]
+    });
+  } else {
+    chart.setOption({
+      ...baseOption,
+      series: [{
+        type: 'bar',
+        data: values,
+        itemStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+            { offset: 0, color: '#8b0a20' },
+            { offset: 1, color: '#c7102e' }
+          ])
+        },
+        label: {
+          show: true,
+          position: hint === 'bar' ? 'right' : 'top',
+          color: '#e8e0d5',
+          fontSize: 10,
+          formatter: '{c}'
+        }
+      }]
+    });
+  }
+
+  // 响应式
+  new ResizeObserver(() => chart.resize()).observe(el);
+}
+
+function renderTable(containerId, data) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const cols = data.columns;
+  const rows = data.rows;
+  const thead = '<thead><tr>' + cols.map(c => `<th>${escapeHtml(c)}</th>`).join('') + '</tr></thead>';
+  const tbody = '<tbody>' + rows.map(r =>
+    '<tr>' + r.map(v => `<td>${escapeHtml(formatVal(v))}</td>`).join('') + '</tr>'
+  ).join('') + '</tbody>';
+  el.innerHTML = `<table class="data-table">${thead}${tbody}</table>`;
+}
+
+function formatVal(v) {
+  if (v === null || v === undefined) return '-';
+  if (typeof v === 'number') return v.toLocaleString();
+  return String(v);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+</script>
+</body>
+</html>

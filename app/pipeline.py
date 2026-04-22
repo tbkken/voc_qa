@@ -1,0 +1,104 @@
+"""问答协调器 - 把 LLM、SQL 守卫、DuckDB 引擎串起来。"""
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, asdict
+from typing import Any
+
+from .engine import VocEngine
+from .llm import LlmClient
+from .sql_guard import SqlGuard
+
+
+@dataclass
+class AskResult:
+    question: str
+    sql: str                          # 经 guard 校验后实际执行的 SQL
+    raw_sql: str                      # LLM 原始输出
+    answer: str                       # 自然语言回答
+    data: dict[str, Any]              # {columns, rows, row_count, truncated}
+    chart_hint: str                   # 图表建议: bar/line/table/none
+    elapsed_ms: int
+    error: str | None = None          # 如有错误
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+class QaPipeline:
+    def __init__(self, engine: VocEngine, llm: LlmClient | None = None,
+                 guard: SqlGuard | None = None):
+        self.engine = engine
+        self.llm = llm or LlmClient()
+        self.guard = guard or SqlGuard()
+
+    def ask(self, question: str) -> AskResult:
+        t0 = time.time()
+
+        # 1. 生成 SQL (llm 内部自己从 config 加载 schema)
+        try:
+            raw_sql = self.llm.generate_sql(question)
+        except Exception as e:
+            return AskResult(question, "", "", f"LLM 调用失败: {e}",
+                             _empty_data(), "none",
+                             int((time.time() - t0) * 1000), str(e))
+
+        # 2. 校验 SQL
+        guard_res = self.guard.check(raw_sql)
+        if not guard_res.ok:
+            return AskResult(question, "", raw_sql,
+                             f"SQL 未通过安全校验: {guard_res.reason}",
+                             _empty_data(), "none",
+                             int((time.time() - t0) * 1000), guard_res.reason)
+
+        # 3. 执行
+        try:
+            data = self.engine.execute(guard_res.sql)
+        except Exception as e:
+            return AskResult(question, guard_res.sql, raw_sql,
+                             f"SQL 执行失败: {e}",
+                             _empty_data(), "none",
+                             int((time.time() - t0) * 1000), str(e))
+
+        # 4. 让 LLM 解读结果
+        try:
+            answer = self.llm.narrate_result(question, guard_res.sql, data)
+        except Exception as e:
+            # 解读失败不是致命错误,给个兜底
+            answer = f"查询成功,共返回 {data['row_count']} 条结果。(结果解读失败: {e})"
+
+        # 5. 图表建议
+        chart_hint = _suggest_chart(guard_res.sql, data)
+
+        return AskResult(
+            question=question,
+            sql=guard_res.sql,
+            raw_sql=raw_sql,
+            answer=answer,
+            data=data,
+            chart_hint=chart_hint,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+
+def _suggest_chart(sql: str, data: dict) -> str:
+    """简单规则推荐图表类型。"""
+    rows = data["rows"]
+    cols = data["columns"]
+    if not rows or not cols:
+        return "none"
+    if len(rows) == 1 and len(cols) == 1:
+        return "metric"
+    if len(cols) >= 2:
+        # 时间维度用折线
+        first_col = cols[0].lower()
+        if any(k in first_col for k in ("month", "date", "pt_d", "day", "week", "time")):
+            return "line"
+        # 其它 TOP 榜用柱状
+        if len(rows) <= 30:
+            return "bar"
+    return "table"
+
+
+def _empty_data() -> dict:
+    return {"columns": [], "rows": [], "row_count": 0, "truncated": False, "elapsed_ms": 0}

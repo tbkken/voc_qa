@@ -1,0 +1,405 @@
+{
+  "generated_at": "2026-04-22T22:31:02",
+  "source_csv": "D:\\code\\voc_qa\\data\\sample_voc.csv",
+  "table_name": "fact_voc",
+  "row_count": 132120,
+  "date_range": {
+    "min": "20251025",
+    "max": "20260422",
+    "current_month": "202604",
+    "previous_month": "202603",
+    "month_count": 7
+  },
+  "fields": [
+    {
+      "name": "pt_d",
+      "type": "VARCHAR",
+      "desc": "数据日期(分区键)",
+      "format": "YYYYMMDD 字符串,如 '20260401'"
+    },
+    {
+      "name": "source_sound_id",
+      "type": "VARCHAR",
+      "desc": "声量唯一标识",
+      "format": "字符串 ID"
+    },
+    {
+      "name": "comment_time",
+      "type": "VARCHAR",
+      "desc": "评论产生时间",
+      "format": "YYYY-MM-DD HH:MM:SS"
+    },
+    {
+      "name": "business_category_name",
+      "type": "VARCHAR",
+      "desc": "业务分类名称(上游业务视角)",
+      "format": "中文字符串"
+    },
+    {
+      "name": "content",
+      "type": "VARCHAR",
+      "desc": "用户评论原文",
+      "format": "中文长文本,可能包含地址/诉求"
+    },
+    {
+      "name": "is_show",
+      "type": "VARCHAR",
+      "desc": "是否对外展示",
+      "format": "0 或 1"
+    },
+    {
+      "name": "data_channel",
+      "type": "VARCHAR",
+      "desc": "数据来源渠道",
+      "format": "枚举,见 enums.data_channel"
+    },
+    {
+      "name": "emotion",
+      "type": "VARCHAR",
+      "desc": "情感极性(重要过滤字段)",
+      "format": "枚举,如 '负向声量'/'正向声量'/'中性声量'"
+    },
+    {
+      "name": "first_category",
+      "type": "VARCHAR",
+      "desc": "一级分类(业务大类)",
+      "format": "枚举,如 '客户服务'/'产品质量'"
+    },
+    {
+      "name": "fifth_category",
+      "type": "VARCHAR",
+      "desc": "五级分类(最细粒度问题点)",
+      "format": "枚举,如 '客服推脱责任'/'手机频繁死机'"
+    },
+    {
+      "name": "keywords_emotion",
+      "type": "VARCHAR",
+      "desc": "关键词-情感标签",
+      "format": "如 '客服推脱-负向观点'"
+    }
+  ],
+  "enums": {
+    "emotion": {
+      "distinct_count": 3,
+      "top_values": [
+        {
+          "value": "正向声量",
+          "count": 59422
+        },
+        {
+          "value": "负向声量",
+          "count": 39738
+        },
+        {
+          "value": "中性声量",
+          "count": 32960
+        }
+      ]
+    },
+    "data_channel": {
+      "distinct_count": 7,
+      "top_values": [
+        {
+          "value": "社媒",
+          "count": 19093
+        },
+        {
+          "value": "线下门店",
+          "count": 19010
+        },
+        {
+          "value": "客服热线",
+          "count": 18959
+        },
+        {
+          "value": "应用市场",
+          "count": 18903
+        },
+        {
+          "value": "官网",
+          "count": 18764
+        },
+        {
+          "value": "电商",
+          "count": 18726
+        },
+        {
+          "value": "用户反馈",
+          "count": 18665
+        }
+      ]
+    },
+    "business_category_name": {
+      "distinct_count": 8,
+      "top_values": [
+        {
+          "value": "产品质量",
+          "count": 60521
+        },
+        {
+          "value": "软件体验",
+          "count": 15462
+        },
+        {
+          "value": "物流配送",
+          "count": 14247
+        },
+        {
+          "value": "价格政策",
+          "count": 11096
+        },
+        {
+          "value": "营销活动",
+          "count": 10967
+        },
+        {
+          "value": "客户服务",
+          "count": 6666
+        },
+        {
+          "value": "电商",
+          "count": 6648
+        },
+        {
+          "value": "售后服务",
+          "count": 6513
+        }
+      ]
+    },
+    "first_category": {
+      "distinct_count": 8,
+      "top_values": [
+        {
+          "value": "产品质量",
+          "count": 60521
+        },
+        {
+          "value": "软件体验",
+          "count": 15462
+        },
+        {
+          "value": "物流配送",
+          "count": 14247
+        },
+        {
+          "value": "价格政策",
+          "count": 11096
+        },
+        {
+          "value": "营销活动",
+          "count": 10967
+        },
+        {
+          "value": "客户服务",
+          "count": 6666
+        },
+        {
+          "value": "电商",
+          "count": 6648
+        },
+        {
+          "value": "售后服务",
+          "count": 6513
+        }
+      ]
+    },
+    "fifth_category": {
+      "distinct_count": 19,
+      "top_values": [
+        {
+          "value": "续航优秀",
+          "count": 15272
+        },
+        {
+          "value": "系统流畅",
+          "count": 12152
+        },
+        {
+          "value": "快充给力",
+          "count": 11902
+        },
+        {
+          "value": "外观精致",
+          "count": 11879
+        },
+        {
+          "value": "拍照满意",
+          "count": 11532
+        },
+        {
+          "value": "价格偏高",
+          "count": 11096
+        },
+        {
+          "value": "以旧换新便利",
+          "count": 10967
+        },
+        {
+          "value": "发货及时",
+          "count": 10897
+        },
+        {
+          "value": "手机频繁死机",
+          "count": 3403
+        },
+        {
+          "value": "发货延迟",
+          "count": 3350
+        },
+        {
+          "value": "客服推脱责任",
+          "count": 3344
+        },
+        {
+          "value": "门店虚假承诺",
+          "count": 3332
+        },
+        {
+          "value": "客服态度恶劣",
+          "count": 3322
+        },
+        {
+          "value": "价格承诺不兑现",
+          "count": 3316
+        },
+        {
+          "value": "系统应用不兼容",
+          "count": 3310
+        },
+        {
+          "value": "摄像头异常",
+          "count": 3285
+        },
+        {
+          "value": "维修周期长",
+          "count": 3280
+        },
+        {
+          "value": "信号差",
+          "count": 3248
+        },
+        {
+          "value": "退换货困难",
+          "count": 3233
+        }
+      ]
+    }
+  },
+  "stats": {
+    "emotion_dist": [
+      {
+        "emotion": "正向声量",
+        "count": 59422,
+        "ratio": 44.98
+      },
+      {
+        "emotion": "负向声量",
+        "count": 39738,
+        "ratio": 30.08
+      },
+      {
+        "emotion": "中性声量",
+        "count": 32960,
+        "ratio": 24.95
+      }
+    ],
+    "channel_total": [
+      {
+        "channel": "社媒",
+        "count": 19093
+      },
+      {
+        "channel": "线下门店",
+        "count": 19010
+      },
+      {
+        "channel": "客服热线",
+        "count": 18959
+      },
+      {
+        "channel": "应用市场",
+        "count": 18903
+      },
+      {
+        "channel": "官网",
+        "count": 18764
+      },
+      {
+        "channel": "电商",
+        "count": 18726
+      },
+      {
+        "channel": "用户反馈",
+        "count": 18665
+      }
+    ],
+    "month_total": [
+      {
+        "month": "202510",
+        "count": 3934
+      },
+      {
+        "month": "202511",
+        "count": 18015
+      },
+      {
+        "month": "202512",
+        "count": 20760
+      },
+      {
+        "month": "202601",
+        "count": 22192
+      },
+      {
+        "month": "202602",
+        "count": 21838
+      },
+      {
+        "month": "202603",
+        "count": 26053
+      },
+      {
+        "month": "202604",
+        "count": 19328
+      }
+    ]
+  },
+  "few_shots": [
+    {
+      "question": "当前数据里一共有多少条记录?",
+      "sql": "SELECT COUNT(*) AS total FROM fact_voc;"
+    },
+    {
+      "question": "负向声量最多的前 10 个具体问题是什么?",
+      "sql": "SELECT fifth_category, COUNT(*) AS cnt\nFROM fact_voc\nWHERE emotion = '负向声量'\nGROUP BY fifth_category\nORDER BY cnt DESC\nLIMIT 10;"
+    },
+    {
+      "question": "最近几个月的声量趋势如何?",
+      "sql": "SELECT SUBSTR(pt_d,1,6) AS month,\n       COUNT(*) AS total,\n       SUM(CASE WHEN emotion = '负向声量' THEN 1 ELSE 0 END) AS negative\nFROM fact_voc\nGROUP BY month\nORDER BY month;"
+    },
+    {
+      "question": "各个渠道的负向占比是多少?",
+      "sql": "SELECT data_channel,\n       COUNT(*) AS total,\n       SUM(CASE WHEN emotion = '负向声量' THEN 1 ELSE 0 END) AS negative,\n       ROUND(100.0 * SUM(CASE WHEN emotion = '负向声量' THEN 1 ELSE 0 END) / COUNT(*), 2) AS neg_ratio\nFROM fact_voc\nGROUP BY data_channel\nORDER BY total DESC;"
+    },
+    {
+      "question": "本月和上月相比,哪类问题的负向投诉增长最多?",
+      "sql": "WITH cur AS (\n  SELECT fifth_category, COUNT(*) AS cur_cnt\n  FROM fact_voc\n  WHERE SUBSTR(pt_d,1,6) = '202604' AND emotion = '负向声量'\n  GROUP BY fifth_category\n), pre AS (\n  SELECT fifth_category, COUNT(*) AS pre_cnt\n  FROM fact_voc\n  WHERE SUBSTR(pt_d,1,6) = '202603' AND emotion = '负向声量'\n  GROUP BY fifth_category\n)\nSELECT c.fifth_category,\n       c.cur_cnt,\n       COALESCE(p.pre_cnt, 0) AS pre_cnt,\n       (c.cur_cnt - COALESCE(p.pre_cnt, 0)) AS delta\nFROM cur c LEFT JOIN pre p USING(fifth_category)\nORDER BY delta DESC\nLIMIT 10;"
+    },
+    {
+      "question": "社媒渠道本月的负向问题 TOP 有哪些?",
+      "sql": "SELECT fifth_category, COUNT(*) AS cnt\nFROM fact_voc\nWHERE SUBSTR(pt_d,1,6) = '202604'\n  AND data_channel = '社媒'\n  AND emotion = '负向声量'\nGROUP BY fifth_category\nORDER BY cnt DESC\nLIMIT 10;"
+    },
+    {
+      "question": "『续航优秀』这个问题最近几个月的变化趋势?",
+      "sql": "SELECT SUBSTR(pt_d,1,6) AS month, COUNT(*) AS cnt\nFROM fact_voc\nWHERE fifth_category = '续航优秀'\n  AND emotion = '负向声量'\nGROUP BY month\nORDER BY month;"
+    },
+    {
+      "question": "整体情感分布是怎样的?",
+      "sql": "SELECT emotion,\n       COUNT(*) AS cnt,\n       ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS ratio\nFROM fact_voc\nGROUP BY emotion\nORDER BY cnt DESC;"
+    },
+    {
+      "question": "随机看几条『续航优秀』的原声评论",
+      "sql": "SELECT comment_time, data_channel, content\nFROM fact_voc\nWHERE fifth_category = '续航优秀'\nORDER BY comment_time DESC\nLIMIT 5;"
+    }
+  ]
+}
