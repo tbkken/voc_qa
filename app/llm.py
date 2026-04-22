@@ -193,12 +193,42 @@ class LlmClient:
         return self._chat(messages, temperature=0.3)
 
     def parse_insight_intent(self, question: str) -> dict:
-        """从问题中解析背景与数据需求列表（纯规则，无 LLM 调用，不会失败）。
+        """用 LLM 从用户输入中提取背景条件和数据需求列表。
 
-        - 含列表触发词（分析以下/如下 + 分隔符）→ 拆分多条 items
-        - 普通单问题 → items=[question]（单条洞察）
+        LLM 理解自然语言，可正确处理问号/句号/顿号分隔的多问题输入。
+        LLM 调用失败时降级为 items=[question]，不中断流程。
         """
-        return _parse_insight_by_rules(question)
+        import json as _json
+
+        messages = [
+            {"role": "system", "content": (
+                "从用户输入中提取所有独立的数据分析需求，只返回 JSON，不要任何解释。\n"
+                '格式：{"background": "通用背景条件（时间/产品范围等，无则空字符串）", '
+                '"items": ["需求1", "需求2", ...]}\n\n'
+                "规则：\n"
+                "- 每个可以独立查询的问题/需求单独作为一条 item\n"
+                "- 按问号、句号、分号、换行、顿号识别独立需求边界\n"
+                "- background 是对所有 items 通用的背景，不重复放进 items\n"
+                "- 只有 1 个需求时 items 也是列表（单元素）"
+            )},
+            {"role": "user", "content": question},
+        ]
+        try:
+            raw = self._chat(messages, temperature=0.1)
+            m = re.search(r'\{.*\}', raw, re.DOTALL)
+            if m:
+                data = _json.loads(m.group())
+                items = [str(x).strip() for x in data.get("items", []) if str(x).strip()]
+                if items:
+                    return {
+                        "is_insight": True,
+                        "background": data.get("background", ""),
+                        "items": items,
+                    }
+        except Exception:
+            pass
+        # LLM 失败时降级为单条
+        return {"is_insight": True, "background": "", "items": [question.strip()]}
 
     def stream_insight_summary(self, background: str, successful_items: list) -> Iterator[str]:
         """生成洞察总结，流式 yield 文本块。"""
@@ -396,34 +426,5 @@ def _strip_think_tags(chunks: Iterator[str]) -> Iterator[str]:
     if buffer and not in_think:
         yield buffer
 
-
-def _parse_insight_by_rules(question: str) -> dict:
-    """纯规则解析洞察意图，无 LLM 调用，始终返回 is_insight=True。
-
-    含列表触发词 → 拆分多条 items；普通问题 → items=[question]。
-    """
-    SPLIT_TRIGGERS = [
-        "分析以下细节：", "分析以下细节:", "分析以下：", "分析以下:",
-        "分析如下细节：", "分析如下：", "分析如下:", "需要分析：", "需要分析:",
-    ]
-
-    bg = ""
-    items: list[str] = []
-
-    for trigger in SPLIT_TRIGGERS:
-        if trigger in question:
-            before, after = question.split(trigger, 1)
-            m = re.search(r"对\s*(.{2,30}?)\s*(?:做|进行|来|，|,)", before.strip())
-            bg = m.group(1).strip() if m else before.strip().rstrip("，,、 ")
-            raw_items = re.split(r"[,，、；;\n]|\d+[.、．]\s*", after.strip())
-            items = [x.strip() for x in raw_items if x.strip()]
-            break
-
-    if not items:
-        m = re.search(r"对\s*(.{2,20}?)\s*(?:的数据)?[，,]", question)
-        bg = m.group(1).strip() if m else ""
-        items = [question.strip()]
-
-    return {"is_insight": True, "background": bg, "items": items}
 
 

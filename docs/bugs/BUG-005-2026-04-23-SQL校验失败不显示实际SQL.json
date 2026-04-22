@@ -1,0 +1,13 @@
+{
+  "id": "BUG-005",
+  "date": "2026-04-23",
+  "title": "SQL 安全校验失败时错误卡片不显示实际 SQL",
+  "severity": "P2",
+  "classification": "B",
+  "spec": "SPEC-001",
+  "ac": ["AC-11"],
+  "root_cause": "item_error payload 只含 error 文案，未包含 raw_sql；AC-11 未定义 sql 字段",
+  "affected_files": ["app/pipeline.py", "web/index.html", "docs/spec/SPEC-001-insight-analysis.md"],
+  "fix_summary": "item_error 增加 sql 字段，前端错误卡片渲染原始 SQL 代码块",
+  "resolution": "full"
+}

@@ -1,0 +1,13 @@
+{
+  "id": "BUG-004",
+  "date": "2026-04-23",
+  "title": "多问题输入被识别为单条数据需求",
+  "severity": "P1",
+  "classification": "B",
+  "spec": "SPEC-001",
+  "ac": ["AC-01"],
+  "root_cause": "规则解析只识别特定触发词，问号分隔的多问题落入单条 fallback，导致 LLM 生成多语句 SQL 被 guard 拦截",
+  "affected_files": ["app/llm.py", "docs/spec/SPEC-001-insight-analysis.md"],
+  "fix_summary": "parse_insight_intent 改为 LLM 解析，删除 _parse_insight_by_rules，LLM 失败时降级单条",
+  "resolution": "full"
+}

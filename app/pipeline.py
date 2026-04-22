@@ -102,7 +102,8 @@ class InsightPipeline:
             try:
                 result = self._qa.ask(question)
                 if result.error:
-                    yield {"type": "item_error", "index": i, "error": result.answer}
+                    yield {"type": "item_error", "index": i, "error": result.answer,
+                           "sql": result.raw_sql}
                     results.append(None)
                 else:
                     rows = result.data.get("rows", [])
