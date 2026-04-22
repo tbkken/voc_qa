@@ -53,7 +53,8 @@ class LlmClient:
     def __init__(self, config: LlmConfig | None = None):
         self.cfg = config or LlmConfig()
 
-    def _chat(self, messages: list[dict], temperature: float = 0.1) -> str:
+    def _chat(self, messages: list[dict], temperature: float = 0.1,
+              strip_think: bool = True) -> str:
         """调用 OpenAI 兼容的 /chat/completions。支持流式 (stream=true)。
 
         流式模式用于应对"反向代理固定超时"场景 - 只要开始流式返回 token,
@@ -90,13 +91,16 @@ class LlmClient:
         for attempt in range(self.cfg.max_retries + 1):
             try:
                 if self.cfg.stream:
-                    return self._chat_stream(url, headers, payload)
+                    return self._chat_stream(url, headers, payload, strip_think=strip_think)
                 else:
                     with httpx.Client(timeout=self.cfg.timeout, trust_env=trust_env) as client:
                         r = client.post(url, headers=headers, json=payload)
                         r.raise_for_status()
                         data = r.json()
-                        return data["choices"][0]["message"]["content"]
+                        content = data["choices"][0]["message"]["content"]
+                        if strip_think:
+                            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+                        return content
             except httpx.HTTPStatusError as e:
                 status = e.response.status_code
                 # 只对可恢复的错误重试
@@ -128,7 +132,8 @@ class LlmClient:
 
         raise RuntimeError(f"LLM 调用重试 {self.cfg.max_retries} 次仍失败,最后错误: {last_err}")
 
-    def _chat_stream(self, url: str, headers: dict, payload: dict) -> str:
+    def _chat_stream(self, url: str, headers: dict, payload: dict,
+                     strip_think: bool = True) -> str:
         """流式调用。收集所有 delta.content 拼成完整回复。"""
         import json as _json
 
@@ -164,8 +169,8 @@ class LlmClient:
                         content_parts.append(c)
 
         result = "".join(content_parts)
-        # Strip <think>...</think> blocks emitted by reasoning models (DeepSeek-R1, QwQ, etc.)
-        result = re.sub(r"<think>.*?</think>", "", result, flags=re.DOTALL).strip()
+        if strip_think:
+            result = re.sub(r"<think>.*?</think>", "", result, flags=re.DOTALL).strip()
         return result
 
     # ============ 公开接口 ============
@@ -195,39 +200,70 @@ class LlmClient:
     def parse_insight_intent(self, question: str) -> dict:
         """用 LLM 从用户输入中提取背景条件和数据需求列表。
 
-        LLM 理解自然语言，可正确处理问号/句号/顿号分隔的多问题输入。
-        LLM 调用失败时降级为 items=[question]，不中断流程。
+        不预先剥离 think 标签：推理模型可能把 JSON 放在 <think> 块内，
+        剥离后 JSON 丢失是之前 fallback 到单条的根因。
+        分三层搜索 JSON：think 块外 → think 块内 → 全文。
+        LLM 失败时先尝试按"？"分割，再降级单条。
         """
         import json as _json
 
         messages = [
             {"role": "system", "content": (
-                "从用户输入中提取所有独立的数据分析需求，只返回 JSON，不要任何解释。\n"
+                "从用户输入中提取所有独立的数据分析需求，只返回 JSON，不要代码块符号，不要任何解释。\n"
                 '格式：{"background": "通用背景条件（时间/产品范围等，无则空字符串）", '
                 '"items": ["需求1", "需求2", ...]}\n\n'
                 "规则：\n"
                 "- 每个可以独立查询的问题/需求单独作为一条 item\n"
-                "- 按问号、句号、分号、换行、顿号识别独立需求边界\n"
-                "- background 是对所有 items 通用的背景，不重复放进 items\n"
-                "- 只有 1 个需求时 items 也是列表（单元素）"
+                "- 问号（？/?）、句号、分号、换行均可作为独立需求边界\n"
+                "- background 是所有 items 共享的背景条件，不重复放进 items\n"
+                "- 只有 1 个需求时 items 也是单元素列表"
             )},
             {"role": "user", "content": question},
         ]
+        raw = None
         try:
-            raw = self._chat(messages, temperature=0.1)
-            m = re.search(r'\{.*\}', raw, re.DOTALL)
-            if m:
+            # strip_think=False：保留完整原始响应，确保 JSON 在 think 块内时也能找到
+            raw = self._chat(messages, temperature=0.1, strip_think=False)
+            print(f"[parse_insight_intent] raw={raw[:400]!r}")
+
+            def _extract_items(text: str):
+                m = re.search(r'\{.*\}', text, re.DOTALL)
+                if not m:
+                    return None
                 data = _json.loads(m.group())
                 items = [str(x).strip() for x in data.get("items", []) if str(x).strip()]
-                if items:
-                    return {
-                        "is_insight": True,
-                        "background": data.get("background", ""),
-                        "items": items,
-                    }
-        except Exception:
-            pass
-        # LLM 失败时降级为单条
+                return (data.get("background", ""), items) if items else None
+
+            # 层 1：think 块之外
+            outside = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+            result = _extract_items(outside)
+
+            # 层 2：think 块内部（逐块搜索）
+            if not result:
+                for block in re.findall(r"<think>(.*?)</think>", raw, re.DOTALL):
+                    result = _extract_items(block)
+                    if result:
+                        break
+
+            # 层 3：全文（不区分 think 边界）
+            if not result:
+                result = _extract_items(raw)
+
+            if result:
+                bg, items = result
+                print(f"[parse_insight_intent] LLM 识别到 {len(items)} 条需求")
+                return {"is_insight": True, "background": bg, "items": items}
+
+        except Exception as e:
+            print(f"[parse_insight_intent] LLM 解析失败: {e}, raw={str(raw)[:300] if raw else 'None'}")
+
+        # 兜底 1：按中英文问号分割（比单条更准确）
+        q_items = [x.strip() for x in re.split(r'[？?]+', question) if x.strip() and len(x.strip()) > 2]
+        if len(q_items) > 1:
+            print(f"[parse_insight_intent] 问号分割兜底: {len(q_items)} 条")
+            return {"is_insight": True, "background": "", "items": q_items}
+
+        # 兜底 2：单条
         return {"is_insight": True, "background": "", "items": [question.strip()]}
 
     def stream_insight_summary(self, background: str, successful_items: list) -> Iterator[str]:
