@@ -98,7 +98,7 @@ python data/init.py data/sample_voc.csv
 # Start manually with auto-reload
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
-# Run all tests (forces LLM_MOCK=1 internally)
+# Run all tests (pipeline tests skipped if LLM not configured)
 python tests/test_e2e.py
 ```
 
@@ -109,7 +109,6 @@ python tests/test_e2e.py
 | `LLM_BASE_URL` | — | OpenAI-compatible endpoint (required) |
 | `LLM_API_KEY` | — | Bearer token |
 | `LLM_MODEL` | `gpt-4o-mini` | Model name |
-| `LLM_MOCK` | `0` | Set to `1` for keyword-based mock LLM (no network) |
 | `LLM_STREAM` | `1` | Enable streaming responses |
 | `LLM_TIMEOUT` | `300` | Request timeout in seconds |
 | `LLM_USE_PROXY` | `0` | Whether to use system `HTTP_PROXY` |
@@ -130,7 +129,7 @@ This is a Voice of Customer (VoC) Q&A system: users ask questions in Chinese →
 
 **Module responsibilities:**
 - `app/engine.py` — DuckDB wrapper; `load_csv()` populates `fact_voc`, `execute()` runs queries
-- `app/llm.py` — OpenAI-compatible HTTP client (httpx); `build_sql_system_prompt()` dynamically includes real enum values from config; Mock fallback maps Chinese keywords to canned SQL
+- `app/llm.py` — OpenAI-compatible HTTP client (httpx); `build_sql_system_prompt()` dynamically includes real enum values from config
 - `app/sql_guard.py` — all SQL security; edit here to adjust allowed tables or forbidden keywords
 - `app/config.py` — cached loader for `data/schema_config.json`; call `reload_schema_config()` after CSV upload
 - `app/main.py` — FastAPI app with 8 routes; global `engine`, `llm`, `pipeline` singletons initialized at startup

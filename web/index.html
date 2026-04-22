@@ -391,11 +391,9 @@ let msgCount = 0;
       fetch(`${API_BASE}/api/llm_status`).then(r => r.json()),
     ]);
 
-    const llmTag = llmRes.mock
-      ? `<span style="color: var(--amber);">MOCK</span>`
-      : (llmRes.configured
-          ? `<span style="color: var(--green);">● ${llmRes.model}</span>`
-          : `<span style="color: var(--red);">✗ LLM 未配置</span>`);
+    const llmTag = llmRes.configured
+      ? `<span style="color: var(--green);">● ${llmRes.model}</span>`
+      : `<span style="color: var(--red);">✗ LLM 未配置</span>`;
 
     statusText.innerHTML = `${llmTag} &nbsp;|&nbsp; ${statsRes.row_count.toLocaleString()} 条 · ${statsRes.date_range.min} → ${statsRes.date_range.max}`;
 

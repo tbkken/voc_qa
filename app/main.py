@@ -146,7 +146,6 @@ async def api_upload(file: UploadFile = File(...)):
 def api_llm_status():
     """让前端能显示当前 LLM 配置状态。"""
     return {
-        "mock": _llm_config.mock,
         "configured": bool(_llm_config.base_url and _llm_config.api_key),
         "model": _llm_config.model,
         "endpoint": _llm_config.base_url or "(未设置)",

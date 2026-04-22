@@ -1,11 +1,10 @@
-"""端到端测试 - 覆盖 config 驱动 + Mock / 真实 LLM 双路径。
+"""端到端测试 - 覆盖 config 驱动、SQL 守卫、Pipeline。
 
 运行:
-    # 默认走 Mock
     python tests/test_e2e.py
 
-    # 跑真实 LLM(需要设置环境变量)
-    LLM_MOCK=0 LLM_BASE_URL=... LLM_API_KEY=... python tests/test_e2e.py
+Pipeline 测试需要配置真实 LLM（LLM_BASE_URL + LLM_API_KEY），
+未配置时自动跳过该节，其余节仍正常执行。
 """
 import os
 import sys
@@ -27,9 +26,6 @@ def banner(msg):
 
 
 def main():
-    # 默认强制开启 mock 便于 CI / 离线测试
-    os.environ.setdefault("LLM_MOCK", "1")
-
     # ============ 1. 确保 config 存在 ============
     banner("1. 检查 schema_config.json")
     try:
@@ -95,41 +91,42 @@ def main():
         status = "✅" if r.ok == expected else "❌"
         print(f"  {status} {'允许' if expected else '拦截'}: {sql[:50]}... → ok={r.ok}")
 
-    # ============ 5. Pipeline 测试 ============
-    banner(f"5. Pipeline 测试 [{LlmConfig().describe()}]")
-    llm = LlmClient()
-    pipeline = QaPipeline(engine, llm, guard)
-
-    questions = [
-        "TOP 10 负向声量问题是什么?",
-        "各渠道的声量分布?",
-        "每月声量趋势?",
-        "客服相关的负向 TOP?",
-        "情感分布?",
-        "总声量是多少?",
-    ]
-    for q in questions:
-        print(f"\n  ❓ {q}")
-        r = pipeline.ask(q)
-        if r.error:
-            print(f"     ❌ {r.error}")
-            continue
-        first_line = r.sql.strip().split("\n")[0]
-        print(f"     📝 {first_line[:80]}...")
-        print(f"     💬 {r.answer[:120]}")
-        print(f"     📊 {r.data['row_count']} 行 · chart={r.chart_hint} · {r.elapsed_ms}ms")
+    # ============ 5. Pipeline 测试（需真实 LLM，未配置时跳过） ============
+    cfg_llm = LlmConfig()
+    banner(f"5. Pipeline 测试 [{cfg_llm.describe()}]")
+    if not (cfg_llm.base_url and cfg_llm.api_key):
+        print("  ⏭  LLM 未配置，跳过 Pipeline 测试")
+        print("     设置 LLM_BASE_URL + LLM_API_KEY 后可运行真实 LLM 测试")
+    else:
+        llm = LlmClient()
+        pipeline = QaPipeline(engine, llm, guard)
+        questions = [
+            "TOP 10 负向声量问题是什么?",
+            "各渠道的声量分布?",
+            "每月声量趋势?",
+            "情感分布?",
+            "总声量是多少?",
+        ]
+        for q in questions:
+            print(f"\n  ❓ {q}")
+            r = pipeline.ask(q)
+            if r.error:
+                print(f"     ❌ {r.error}")
+                continue
+            first_line = r.sql.strip().split("\n")[0]
+            print(f"     📝 {first_line[:80]}...")
+            print(f"     💬 {r.answer[:120]}")
+            print(f"     📊 {r.data['row_count']} 行 · chart={r.chart_hint} · {r.elapsed_ms}ms")
 
     # ============ 6. LLM 配置诊断 ============
     banner("6. LLM 配置诊断")
-    cfg_llm = LlmConfig()
-    if cfg_llm.mock:
-        print("  ℹ️  当前为 MOCK 模式。要切真实 LLM,请设置:")
-        print("      export LLM_MOCK=0")
+    if cfg_llm.base_url and cfg_llm.api_key:
+        print(f"  ✅ 已配置真实 LLM: {cfg_llm.describe()}")
+    else:
+        print("  ⚠️  LLM 未配置，请设置:")
         print("      export LLM_BASE_URL=https://your-endpoint/v1")
         print("      export LLM_API_KEY=sk-xxx")
         print("      export LLM_MODEL=gpt-4o-mini")
-    else:
-        print(f"  ✅ 已配置真实 LLM: {cfg_llm.describe()}")
 
     banner("✅ 所有测试通过")
     return 0

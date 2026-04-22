@@ -29,7 +29,6 @@ class LlmConfig:
     base_url: str = field(default_factory=lambda: os.getenv("LLM_BASE_URL", ""))
     api_key: str = field(default_factory=lambda: os.getenv("LLM_API_KEY", ""))
     model: str = field(default_factory=lambda: os.getenv("LLM_MODEL", "gpt-4o-mini"))
-    mock: bool = field(default_factory=lambda: os.getenv("LLM_MOCK", "0") == "1")
     # 默认 300s
     timeout: float = field(default_factory=lambda: float(os.getenv("LLM_TIMEOUT", "300")))
     # 504/超时自动重试次数
@@ -42,8 +41,6 @@ class LlmConfig:
     use_proxy: bool = field(default_factory=lambda: os.getenv("LLM_USE_PROXY", "0") == "1")
 
     def describe(self) -> str:
-        if self.mock:
-            return "LLM: MOCK 模式(关键词匹配)"
         if not self.base_url:
             return "LLM: ⚠️ 未配置 LLM_BASE_URL"
         mode = " [流式]" if self.stream else ""
@@ -171,9 +168,6 @@ class LlmClient:
     # ============ 公开接口 ============
     def generate_sql(self, question: str) -> str:
         """自然语言 -> SQL。Prompt 完全由 schema_config.json 驱动。"""
-        if self.cfg.mock:
-            return _mock_generate_sql(question)
-
         schema = load_schema_config()
         system_prompt = build_sql_system_prompt(schema)
         messages = [
@@ -186,9 +180,6 @@ class LlmClient:
     def narrate_result(self, question: str, sql: str,
                        result: dict[str, Any]) -> str:
         """SQL 查询结果 -> 给人读的自然语言总结。"""
-        if self.cfg.mock:
-            return _mock_narrate(question, result)
-
         preview = _result_to_compact_text(result, max_rows=20)
         # 精简 prompt:不传 SQL(对解读没用)、指令更短
         system = "你是数据分析助手。用不超过 150 字的中文总结查询结果:首句结论,引用 TOP1/TOP2 具体数字,点出异常。不要复述问题,不要解释 SQL。"
@@ -208,10 +199,6 @@ class LlmClient:
 
     def stream_insight_summary(self, background: str, successful_items: list) -> Iterator[str]:
         """生成洞察总结，流式 yield 文本块。"""
-        if self.cfg.mock:
-            yield from _mock_stream_summary(successful_items)
-            return
-
         parts = []
         for idx, item in enumerate(successful_items, 1):
             query = item.get("query", f"分析{idx}")
@@ -370,40 +357,6 @@ def _result_to_compact_text(result: dict, max_rows: int = 20) -> str:
     return "\n".join(lines)
 
 
-# ============ Mock 兜底 ============
-# Mock 现在只作为"无网络/无 key"时的应急手段。
-# 规则经过精简,只保留最通用的几条,因为真实 LLM 才是主路径。
-_MOCK_RULES: list[tuple[list[str], str]] = [
-    (["客服"], """SELECT fifth_category, COUNT(*) AS cnt
-FROM fact_voc WHERE first_category = '客户服务' AND emotion = '负向声量'
-GROUP BY fifth_category ORDER BY cnt DESC LIMIT 10"""),
-    (["渠道"], """SELECT data_channel, COUNT(*) AS total,
-       SUM(CASE WHEN emotion='负向声量' THEN 1 ELSE 0 END) AS negative,
-       ROUND(100.0 * SUM(CASE WHEN emotion='负向声量' THEN 1 ELSE 0 END) / COUNT(*), 2) AS neg_ratio
-FROM fact_voc GROUP BY data_channel ORDER BY total DESC"""),
-    (["趋势"], """SELECT SUBSTR(pt_d,1,6) AS month, COUNT(*) AS total,
-       SUM(CASE WHEN emotion='负向声量' THEN 1 ELSE 0 END) AS negative
-FROM fact_voc GROUP BY month ORDER BY month"""),
-    (["情感"], """SELECT emotion, COUNT(*) AS cnt,
-       ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS ratio
-FROM fact_voc GROUP BY emotion ORDER BY cnt DESC"""),
-    (["总", "声量"], "SELECT COUNT(*) AS total FROM fact_voc"),
-    (["总数"], "SELECT COUNT(*) AS total FROM fact_voc"),
-    (["负向"], """SELECT fifth_category, COUNT(*) AS cnt
-FROM fact_voc WHERE emotion = '负向声量'
-GROUP BY fifth_category ORDER BY cnt DESC LIMIT 10"""),
-]
-
-
-def _mock_generate_sql(question: str) -> str:
-    q = question.lower()
-    for keywords, sql in _MOCK_RULES:
-        if all(kw.lower() in q for kw in keywords):
-            return sql
-    return """SELECT fifth_category, COUNT(*) AS cnt
-FROM fact_voc WHERE emotion = '负向声量'
-GROUP BY fifth_category ORDER BY cnt DESC LIMIT 10"""
-
 
 def _parse_insight_by_rules(question: str) -> dict:
     """纯规则解析洞察意图，无 LLM 调用，始终返回 is_insight=True。
@@ -435,42 +388,3 @@ def _parse_insight_by_rules(question: str) -> dict:
     return {"is_insight": True, "background": bg, "items": items}
 
 
-def _mock_stream_summary(successful_items: list) -> Iterator[str]:
-    n = len(successful_items)
-    text = (
-        f"「数据全貌」：本次共分析 {n} 项数据，各维度呈现出清晰的规律特征。\n\n"
-        "「头部集中效应」：TOP3 品类合计占据整体负向声量的 60% 以上，"
-        "建议优先针对头部问题制定专项改善方案。\n\n"
-        "「情感分布不均」：负向声量主要集中在特定品类，"
-        "正向声量分布相对分散，说明用户痛点较为集中。\n\n"
-        "「时间趋势向好」：近期声量数据呈现积极变化，"
-        "建议持续跟踪月度变化，及时捕捉异动信号。"
-    )
-    for char in text:
-        yield char
-
-
-def _mock_narrate(question: str, result: dict) -> str:
-    rows = result["rows"]
-    cols = result["columns"]
-    if not rows:
-        return "查询成功,但没有命中任何数据。可以换个条件试试。"
-    if len(rows) == 1 and len(cols) == 1:
-        return f"查询结果:{cols[0]} = {rows[0][0]}"
-    if len(cols) >= 2 and len(rows) >= 2:
-        try:
-            top = rows[0]
-            val_col = cols[-1]
-            n = len(rows)
-            total = sum(int(r[-1]) for r in rows
-                        if isinstance(r[-1], (int, float))
-                        or (isinstance(r[-1], str) and str(r[-1]).replace('.', '').isdigit()))
-            parts = [f"共 {n} 条结果,首位是「{top[0]}」,{val_col}={top[-1]}。"]
-            if total > 0 and isinstance(top[-1], (int, float)):
-                parts.append(f"约占整体 {100.0 * top[-1] / total:.1f}%。")
-            if n >= 3:
-                parts.append(f"其次「{rows[1][0]}」和「{rows[2][0]}」。")
-            return " ".join(parts)
-        except Exception:
-            pass
-    return f"查询完成,共 {len(rows)} 条结果。"
