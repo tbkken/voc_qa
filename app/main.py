@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import tempfile
@@ -20,13 +21,13 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .engine import VocEngine
 from .llm import LlmClient, LlmConfig
-from .pipeline import QaPipeline
+from .pipeline import InsightPipeline, QaPipeline
 from .sql_guard import SqlGuard
 
 # ============ 全局对象(启动时初始化) ============
@@ -203,6 +204,75 @@ def api_sample_questions():
             "正向反馈的关键词 TOP 10?",
         ]
     }
+
+
+@app.post("/api/insight")
+def api_insight(req: AskRequest):
+    """洞察分析接口，SSE 流式推送各阶段事件。"""
+    if not req.question.strip():
+        raise HTTPException(status_code=400, detail="问题不能为空")
+    if engine.row_count() == 0:
+        raise HTTPException(status_code=400, detail="尚未加载任何数据，请先上传 CSV")
+
+    def generate():
+        def sse(data: dict) -> str:
+            return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+        # Step 1: 解析洞察意图
+        try:
+            parsed = llm.parse_insight_intent(req.question)
+        except Exception as e:
+            yield sse({"type": "error", "error": f"洞察解析失败: {e}"})
+            return
+
+        if not parsed.get("is_insight"):
+            yield sse({"type": "error", "error": "未识别为洞察分析请求，请包含「洞察」/「分析以下」等关键词"})
+            return
+
+        items: list[str] = parsed.get("items", [])
+        if not items:
+            yield sse({"type": "error", "error": "未能解析出有效的分析需求，请重新描述（如：分析以下细节：需求1、需求2）"})
+            return
+
+        background: str = parsed.get("background", "")
+
+        # Step 2: 推送 init 事件
+        yield sse({"type": "init", "total": len(items), "background": background, "items": items})
+
+        # Step 3: 串行处理每条需求
+        insight_pl = InsightPipeline(engine=engine, llm=llm, guard=SqlGuard(max_limit=1000))
+        successful_items: list[dict] = []
+
+        for event in insight_pl.run(background, items):
+            if event["type"] == "all_done":
+                break
+            yield sse(event)
+            if event["type"] == "item_done":
+                successful_items.append({"query": items[event["index"]], **event})
+
+        # Step 4: 生成洞察总结
+        if not successful_items:
+            yield sse({"type": "summary_error", "error": "所有数据需求均分析失败，无法生成洞察总结"})
+            return
+
+        failed_count = len(items) - len(successful_items)
+        try:
+            first_chunk = True
+            for chunk in llm.stream_insight_summary(background, successful_items):
+                if first_chunk and failed_count > 0:
+                    prefix = f"以下洞察基于 {len(successful_items)}/{len(items)} 项成功分析\n\n"
+                    yield sse({"type": "summary_chunk", "text": prefix})
+                first_chunk = False
+                yield sse({"type": "summary_chunk", "text": chunk})
+            yield sse({"type": "summary_done"})
+        except Exception:
+            yield sse({"type": "summary_error", "error": "洞察总结生成失败，但各项分析数据已在下方展示"})
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/api/health")

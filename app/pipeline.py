@@ -81,6 +81,51 @@ class QaPipeline:
         )
 
 
+class InsightPipeline:
+    """串行处理多个数据需求，逐条 yield SSE 事件 dict。"""
+
+    def __init__(self, engine: VocEngine, llm: LlmClient | None = None,
+                 guard: SqlGuard | None = None):
+        self.engine = engine
+        self.llm = llm or LlmClient()
+        self.guard = guard or SqlGuard()
+        self._qa = QaPipeline(engine, self.llm, self.guard)
+
+    def run(self, background: str, items: list[str]):
+        total = len(items)
+        results: list[dict | None] = []
+
+        for i, item in enumerate(items):
+            yield {"type": "item_start", "index": i, "total": total, "query": item}
+
+            question = f"{background}，{item}" if background else item
+            try:
+                result = self._qa.ask(question)
+                if result.error:
+                    yield {"type": "item_error", "index": i, "error": result.answer}
+                    results.append(None)
+                else:
+                    rows = result.data.get("rows", [])
+                    chart_type = result.chart_hint if rows else "table"
+                    evt: dict[str, Any] = {
+                        "type": "item_done",
+                        "index": i,
+                        "sql": result.sql,
+                        "narration": result.answer,
+                        "chart_type": chart_type,
+                        "columns": result.data.get("columns", []),
+                        "rows": rows,
+                        "row_count": result.data.get("row_count", 0),
+                    }
+                    yield evt
+                    results.append(evt)
+            except Exception as e:
+                yield {"type": "item_error", "index": i, "error": f"处理异常: {e}"}
+                results.append(None)
+
+        yield {"type": "all_done", "results": results}
+
+
 def _suggest_chart(sql: str, data: dict) -> str:
     """简单规则推荐图表类型。"""
     rows = data["rows"]

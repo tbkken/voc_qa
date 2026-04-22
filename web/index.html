@@ -248,6 +248,66 @@
   .input-wrap button:hover:not(:disabled) { background: #a30e28; }
   .input-wrap button:disabled { background: #3a3f46; cursor: not-allowed; }
 
+  /* Insight Analysis Components */
+  .insight-wrap { display: flex; flex-direction: column; gap: 12px; }
+
+  .insight-summary-placeholder {
+    background: rgba(199, 16, 46, 0.06);
+    border: 1px solid rgba(199, 16, 46, 0.35);
+    padding: 18px 22px;
+    min-height: 56px;
+  }
+  .insight-summary-placeholder .loading { margin: 0; }
+
+  .insight-summary-card {
+    background: rgba(199, 16, 46, 0.07);
+    border: 1px solid rgba(199, 16, 46, 0.45);
+    padding: 20px 24px;
+  }
+  .insight-summary-title {
+    font-family: var(--serif); font-size: 15px; font-weight: 600;
+    color: var(--text); margin-bottom: 14px; letter-spacing: 0.02em;
+  }
+  .insight-summary-content {
+    font-family: var(--serif); font-size: 14px; color: var(--text);
+    line-height: 1.9;
+  }
+  .insight-summary-content p { margin-bottom: 10px; }
+  .insight-summary-content p:last-child { margin-bottom: 0; }
+
+  .insight-items { display: flex; flex-direction: column; gap: 10px; }
+
+  .insight-item-card {
+    background: var(--surface); border: 1px solid var(--border); overflow: hidden;
+  }
+  .insight-item-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(0,0,0,0.2);
+  }
+  .insight-item-num {
+    width: 20px; height: 20px; background: var(--red); color: #fff;
+    font-size: 10px; display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; font-family: var(--mono);
+  }
+  .insight-item-title { font-size: 12px; color: var(--text-dim); }
+  .insight-item-body { padding: 14px; }
+  .insight-item-loading {
+    display: flex; align-items: center; gap: 8px;
+    color: var(--text-muted); font-size: 12px; font-style: italic; padding: 4px 0;
+  }
+  .insight-item-chart { width: 100%; height: 220px; margin-bottom: 10px; }
+  .insight-item-table { max-height: 140px; overflow-y: auto; margin-bottom: 10px; }
+  .insight-item-narration {
+    font-size: 12px; color: var(--text-dim); line-height: 1.7;
+    font-family: var(--serif);
+  }
+  .insight-item-error {
+    background: rgba(199,16,46,0.08); border: 1px solid rgba(199,16,46,0.25);
+    padding: 10px 14px; font-size: 12px; color: #f5a3af;
+  }
+
   /* Footer */
   .footer {
     border-top: 1px solid var(--border); padding: 16px 40px;
@@ -321,6 +381,11 @@ const chipsEl = document.getElementById('chips');
 let loading = false;
 let msgCount = 0;
 
+const INSIGHT_TRIGGERS = ['洞察', '分析以下', '分析如下', '数据洞察'];
+function isInsightQuestion(q) {
+  return INSIGHT_TRIGGERS.some(t => q.includes(t));
+}
+
 // ============ Init ============
 (async () => {
   try {
@@ -363,32 +428,224 @@ async function ask(question) {
   question = (question || '').trim();
   if (!question || loading) return;
 
-  // 隐藏建议
   suggestionsEl.style.display = 'none';
-
   renderUserMessage(question);
   inputEl.value = '';
   loading = true;
   sendBtn.disabled = true;
-  const loadingEl = renderLoading();
 
   try {
-    const res = await fetch(`${API_BASE}/api/ask`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question })
-    });
-    const data = await res.json();
-    loadingEl.remove();
-    renderAssistantMessage(data);
+    if (isInsightQuestion(question)) {
+      await askInsight(question);
+    } else {
+      const loadingEl = renderLoading();
+      const res = await fetch(`${API_BASE}/api/ask`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question })
+      });
+      const data = await res.json();
+      loadingEl.remove();
+      renderAssistantMessage(data);
+      chatEl.scrollTop = chatEl.scrollHeight;
+    }
   } catch (e) {
-    loadingEl.remove();
     renderErrorMessage('请求失败: ' + e.message);
   } finally {
     loading = false;
     sendBtn.disabled = false;
-    chatEl.scrollTop = chatEl.scrollHeight;
   }
+}
+
+// ============ Insight ============
+async function askInsight(question) {
+  const msgId = createInsightBubble();
+  let total = 0;
+  let finishedCount = 0;
+
+  try {
+    const response = await fetch(`${API_BASE}/api/insight`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question })
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        let event;
+        try { event = JSON.parse(line.slice(6)); } catch { continue; }
+
+        handleInsightEvent(event, msgId);
+
+        if (event.type === 'init') {
+          total = event.total;
+        } else if (event.type === 'item_done' || event.type === 'item_error') {
+          finishedCount++;
+          const remaining = total - finishedCount;
+          if (remaining > 0) {
+            updateSummaryText(msgId, `🔍 正在洞察分析，还有 ${remaining} 个数据待分析…`);
+          } else {
+            updateSummaryText(msgId, '📝 所有数据已就绪，正在生成洞察总结…');
+          }
+        }
+      }
+    }
+  } catch (e) {
+    const wrap = document.getElementById(`insight-${msgId}`);
+    if (wrap) wrap.innerHTML = `<div class="error-box">${escapeHtml('洞察分析请求失败: ' + e.message)}</div>`;
+  }
+}
+
+function createInsightBubble() {
+  const msgId = ++msgCount;
+  const div = document.createElement('div');
+  div.className = 'msg msg-assistant';
+  div.innerHTML = `
+    <div class="msg-meta">
+      <div class="msg-avatar">◈</div>
+      <span class="msg-meta-label">INSIGHT ANALYSIS</span>
+    </div>
+    <div class="insight-wrap" id="insight-${msgId}">
+      <div class="insight-summary-placeholder" id="insight-summary-${msgId}">
+        <div class="loading">
+          <div class="loading-dot"></div>
+          <span id="insight-summary-text-${msgId}">🔍 正在解析分析需求...</span>
+        </div>
+      </div>
+      <div class="insight-items" id="insight-items-${msgId}"></div>
+    </div>`;
+  chatEl.appendChild(div);
+  chatEl.scrollTop = chatEl.scrollHeight;
+  return msgId;
+}
+
+function updateSummaryText(msgId, text) {
+  const el = document.getElementById(`insight-summary-text-${msgId}`);
+  if (el) el.textContent = text;
+}
+
+function handleInsightEvent(event, msgId) {
+  const summaryEl = document.getElementById(`insight-summary-${msgId}`);
+  const itemsEl = document.getElementById(`insight-items-${msgId}`);
+
+  switch (event.type) {
+    case 'init': {
+      updateSummaryText(msgId, `🔍 正在洞察分析，还有 ${event.total} 个数据待分析…`);
+      event.items.forEach((query, i) => itemsEl.appendChild(createItemCard(msgId, i, query)));
+      chatEl.scrollTop = chatEl.scrollHeight;
+      break;
+    }
+
+    case 'item_done': {
+      const card = document.getElementById(`insight-item-${msgId}-${event.index}`);
+      if (!card) break;
+      const body = card.querySelector('.insight-item-body');
+      const hasData = event.rows && event.rows.length > 0;
+      const chartId = `insight-chart-${msgId}-${event.index}`;
+      const tableId = `insight-table-${msgId}-${event.index}`;
+
+      if (hasData) {
+        body.innerHTML = `
+          <div id="${chartId}" class="insight-item-chart"></div>
+          <div id="${tableId}" class="insight-item-table"></div>
+          <div class="insight-item-narration"></div>
+          ${event.sql ? `<details class="sql-box" style="margin-top:8px;">
+            <summary>查看生成的 SQL</summary>
+            <pre>${escapeHtml(event.sql)}</pre>
+          </details>` : ''}`;
+        body.querySelector('.insight-item-narration').textContent = event.narration || '';
+        renderChart(chartId, { data: { columns: event.columns, rows: event.rows }, chart_hint: event.chart_type });
+        renderTable(tableId, { columns: event.columns, rows: event.rows });
+      } else {
+        body.innerHTML = `
+          <div class="insight-item-narration" style="margin-bottom:8px;"></div>
+          <div style="font-size:11px;color:var(--text-muted);font-style:italic;">暂无数据</div>`;
+        body.querySelector('.insight-item-narration').textContent = event.narration || '';
+      }
+      card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      break;
+    }
+
+    case 'item_error': {
+      const card = document.getElementById(`insight-item-${msgId}-${event.index}`);
+      if (!card) break;
+      card.querySelector('.insight-item-body').innerHTML =
+        `<div class="insight-item-error">${escapeHtml(event.error || '分析失败')}</div>`;
+      break;
+    }
+
+    case 'summary_chunk': {
+      let contentEl = document.getElementById(`insight-summary-content-${msgId}`);
+      if (!contentEl && summaryEl) {
+        summaryEl.className = 'insight-summary-card';
+        summaryEl.innerHTML = `
+          <div class="insight-summary-title">📊 洞察总结</div>
+          <div class="insight-summary-content" id="insight-summary-content-${msgId}"></div>`;
+        contentEl = document.getElementById(`insight-summary-content-${msgId}`);
+        summaryEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+      if (contentEl) contentEl.textContent += event.text;
+      break;
+    }
+
+    case 'summary_done': {
+      const contentEl = document.getElementById(`insight-summary-content-${msgId}`);
+      if (contentEl) contentEl.innerHTML = formatSummaryText(contentEl.textContent);
+      break;
+    }
+
+    case 'summary_error': {
+      if (summaryEl) {
+        summaryEl.className = 'insight-summary-placeholder';
+        summaryEl.innerHTML = `<div class="error-box">${escapeHtml(event.error)}</div>`;
+      }
+      break;
+    }
+
+    case 'error': {
+      const wrap = document.getElementById(`insight-${msgId}`);
+      if (wrap) wrap.innerHTML = `<div class="error-box">${escapeHtml(event.error)}</div>`;
+      break;
+    }
+  }
+}
+
+function createItemCard(msgId, index, query) {
+  const card = document.createElement('div');
+  card.className = 'insight-item-card';
+  card.id = `insight-item-${msgId}-${index}`;
+  card.innerHTML = `
+    <div class="insight-item-header">
+      <div class="insight-item-num">${index + 1}</div>
+      <div class="insight-item-title">${escapeHtml(query)}</div>
+    </div>
+    <div class="insight-item-body">
+      <div class="insight-item-loading">
+        <div class="loading-dot"></div>
+        <span>正在分析...</span>
+      </div>
+    </div>`;
+  return card;
+}
+
+function formatSummaryText(text) {
+  const esc = escapeHtml(text);
+  return '<p>' + esc
+    .replace(/「([^」]+)」/g, '<strong>「$1」</strong>')
+    .replace(/\n\n+/g, '</p><p>')
+    .replace(/\n/g, '<br>') + '</p>';
 }
 
 // ============ Render ============

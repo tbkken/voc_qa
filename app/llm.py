@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Iterator
 
 import httpx
 
@@ -198,6 +198,130 @@ class LlmClient:
         ]
         return self._chat(messages, temperature=0.3)
 
+    def parse_insight_intent(self, question: str) -> dict:
+        """判断是否为洞察分析意图，解析 background 与 items 列表。
+
+        Returns: {is_insight, background, items}
+        """
+        if self.cfg.mock:
+            return _mock_parse_insight(question)
+
+        import json as _json
+
+        system = (
+            "判断用户输入是否为「洞察分析」请求，返回 JSON（不加代码块标记）。\n"
+            "洞察分析特征：含「洞察」/「数据洞察」/「分析以下」/「分析如下」等触发词，且有多个具体分析需求。\n"
+            "格式：{\"is_insight\":true/false,\"background\":\"背景条件(无则空串)\","
+            "\"items\":[\"需求1\",\"需求2\"]}\n"
+            "非洞察请求返回：{\"is_insight\":false,\"background\":\"\",\"items\":[]}"
+        )
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": question},
+        ]
+        url = self.cfg.base_url.rstrip("/") + "/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.cfg.api_key}",
+        }
+        payload = {"model": self.cfg.model, "messages": messages, "temperature": 0.0}
+        trust_env = self.cfg.use_proxy
+
+        try:
+            with httpx.Client(timeout=30.0, trust_env=trust_env) as client:
+                r = client.post(url, headers=headers, json=payload)
+                r.raise_for_status()
+                raw = r.json()["choices"][0]["message"]["content"]
+            clean = re.sub(r"```(?:json)?\s*|\s*```", "", raw.strip()).strip()
+            result = _json.loads(clean)
+            return {
+                "is_insight": bool(result.get("is_insight", False)),
+                "background": str(result.get("background", "")),
+                "items": [s.strip() for s in result.get("items", []) if str(s).strip()],
+            }
+        except Exception:
+            return {"is_insight": False, "background": "", "items": []}
+
+    def stream_insight_summary(self, background: str, successful_items: list) -> Iterator[str]:
+        """生成洞察总结，流式 yield 文本块。"""
+        if self.cfg.mock:
+            yield from _mock_stream_summary(successful_items)
+            return
+
+        parts = []
+        for idx, item in enumerate(successful_items, 1):
+            query = item.get("query", f"分析{idx}")
+            narration = item.get("narration", "")
+            rows = item.get("rows", [])[:3]
+            cols = item.get("columns", [])
+            data_snippet = ""
+            if rows and cols:
+                data_snippet = "；".join(
+                    f"{r[0]}={r[-1]}" for r in rows if len(r) >= 2
+                )
+            parts.append(
+                f"【第{idx}项：{query}】\n"
+                f"结论：{narration}"
+                + (f"\n核心数据：{data_snippet}" if data_snippet else "")
+            )
+
+        system = (
+            "你是数据洞察专家，根据以下多维度分析数据，提炼 3~5 个核心洞察观点。\n\n"
+            "格式要求：\n"
+            "- 每个洞察点独立成段\n"
+            "- 格式：「观点标题」：一句结论，引用具体数字佐证\n"
+            "- 观点清晰有结论性，不泛泛而谈\n"
+            "- 直接输出洞察内容，不要引言\n\n"
+            "数据来源：\n" + "\n\n".join(parts)
+        )
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": f"背景：{background or '全量数据'}。请提炼核心洞察。"},
+        ]
+        yield from self._stream_chat_chunks(messages, temperature=0.4)
+
+    def _stream_chat_chunks(self, messages: list, temperature: float = 0.3) -> Iterator[str]:
+        """流式调用 LLM，逐 token 块 yield 文本。"""
+        import json as _json
+
+        if not self.cfg.base_url or not self.cfg.api_key:
+            raise RuntimeError("LLM 未配置，请设置 LLM_BASE_URL 和 LLM_API_KEY")
+        url = self.cfg.base_url.rstrip("/") + "/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.cfg.api_key}",
+        }
+        payload = {
+            "model": self.cfg.model,
+            "messages": messages,
+            "temperature": temperature,
+            "stream": True,
+        }
+        trust_env = self.cfg.use_proxy
+        with httpx.Client(timeout=self.cfg.timeout, trust_env=trust_env) as client:
+            with client.stream("POST", url, headers=headers, json=payload) as r:
+                if r.status_code != 200:
+                    r.read()
+                    r.raise_for_status()
+                for line in r.iter_lines():
+                    if not line:
+                        continue
+                    if line.startswith("data: "):
+                        line = line[6:]
+                    if line == "[DONE]":
+                        break
+                    try:
+                        chunk = _json.loads(line)
+                    except Exception:
+                        continue
+                    choices = chunk.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta") or {}
+                    c = delta.get("content")
+                    if c:
+                        yield c
+
 
 # ============ Prompt 构建(完全数据驱动) ============
 def build_sql_system_prompt(schema: dict) -> str:
@@ -315,6 +439,46 @@ def _mock_generate_sql(question: str) -> str:
     return """SELECT fifth_category, COUNT(*) AS cnt
 FROM fact_voc WHERE emotion = '负向声量'
 GROUP BY fifth_category ORDER BY cnt DESC LIMIT 10"""
+
+
+def _mock_parse_insight(question: str) -> dict:
+    TRIGGERS = ["洞察", "分析以下", "分析如下", "数据洞察"]
+    if not any(t in question for t in TRIGGERS):
+        return {"is_insight": False, "background": "", "items": []}
+
+    bg = ""
+    m = re.search(r"对\s*(.{2,20}?)\s*(?:的数据)?[，,]", question)
+    if m:
+        bg = m.group(1)
+
+    items: list[str] = []
+    for trigger in ["分析以下细节：", "分析以下细节:", "分析以下：", "分析以下:",
+                    "分析如下细节：", "分析如下：", "分析如下:", "：", ":"]:
+        if trigger in question:
+            rest = question.split(trigger, 1)[1]
+            candidates = [x.strip() for x in re.split(r"[,，、；;\n]", rest) if x.strip()]
+            if candidates:
+                items = candidates
+                break
+
+    if not items:
+        items = ["整体声量分布", "负向声量 TOP 品类"]
+    return {"is_insight": True, "background": bg, "items": items}
+
+
+def _mock_stream_summary(successful_items: list) -> Iterator[str]:
+    n = len(successful_items)
+    text = (
+        f"「数据全貌」：本次共分析 {n} 项数据，各维度呈现出清晰的规律特征。\n\n"
+        "「头部集中效应」：TOP3 品类合计占据整体负向声量的 60% 以上，"
+        "建议优先针对头部问题制定专项改善方案。\n\n"
+        "「情感分布不均」：负向声量主要集中在特定品类，"
+        "正向声量分布相对分散，说明用户痛点较为集中。\n\n"
+        "「时间趋势向好」：近期声量数据呈现积极变化，"
+        "建议持续跟踪月度变化，及时捕捉异动信号。"
+    )
+    for char in text:
+        yield char
 
 
 def _mock_narrate(question: str, result: dict) -> str:
