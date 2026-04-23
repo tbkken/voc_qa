@@ -205,6 +205,22 @@ class LlmClient:
         ]
         return self._chat(messages, temperature=0.1)
 
+    def fix_sql(self, question: str, bad_sql: str, error_msg: str) -> str:
+        """SQL 执行失败后，携带错误上下文让 LLM 修正，返回修正后的 SQL。"""
+        schema = load_schema_config()
+        system_prompt = build_sql_system_prompt(schema)
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": question},
+            {"role": "assistant", "content": f"```sql\n{bad_sql}\n```"},
+            {"role": "user", "content": (
+                f"上面的 SQL 执行时报错：\n{error_msg}\n\n"
+                "请根据错误信息修正 SQL，只返回修正后的 SQL，用 ```sql ... ``` 包裹。"
+            )},
+        ]
+        raw = self._chat(messages, temperature=0.05)
+        return _extract_sql(raw)
+
     def parse_insight_intent(self, question: str) -> dict:
         """用 LLM 从用户输入中提取背景条件和数据需求列表。
 

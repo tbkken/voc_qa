@@ -51,28 +51,47 @@ class QaPipeline:
                              _empty_data(), "none",
                              int((time.time() - t0) * 1000), guard_res.reason)
 
-        # 3. 执行
-        try:
-            data = self.engine.execute(guard_res.sql)
-        except Exception as e:
-            return AskResult(question, guard_res.sql, raw_sql,
-                             f"SQL 执行失败: {e}",
+        # 3. 执行（失败时携带错误上下文让 LLM 修正，最多重试 1 次）
+        exec_sql = guard_res.sql
+        exec_err: str | None = None
+        for attempt in range(2):
+            try:
+                data = self.engine.execute(exec_sql)
+                exec_err = None
+                break
+            except Exception as e:
+                exec_err = str(e)
+                if attempt == 0:
+                    # 首次失败 → 让 LLM 修正 SQL 并重试
+                    try:
+                        fixed_raw = self.llm.fix_sql(question, exec_sql, exec_err)
+                        fixed_guard = self.guard.check(fixed_raw)
+                        if fixed_guard.ok:
+                            exec_sql = fixed_guard.sql
+                            continue  # 进入第二次循环
+                    except Exception:
+                        pass
+                break  # 修正失败或重试仍报错，退出
+
+        if exec_err:
+            return AskResult(question, exec_sql, raw_sql,
+                             f"SQL 执行失败: {exec_err}",
                              _empty_data(), "none",
-                             int((time.time() - t0) * 1000), str(e))
+                             int((time.time() - t0) * 1000), exec_err)
 
         # 4. 让 LLM 解读结果
         try:
-            answer = self.llm.narrate_result(question, guard_res.sql, data)
+            answer = self.llm.narrate_result(question, exec_sql, data)
         except Exception as e:
             # 解读失败不是致命错误,给个兜底
             answer = f"查询成功,共返回 {data['row_count']} 条结果。(结果解读失败: {e})"
 
         # 5. 图表建议
-        chart_hint = _suggest_chart(guard_res.sql, data)
+        chart_hint = _suggest_chart(exec_sql, data)
 
         return AskResult(
             question=question,
-            sql=guard_res.sql,
+            sql=exec_sql,
             raw_sql=raw_sql,
             answer=answer,
             data=data,

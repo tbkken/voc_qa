@@ -1,0 +1,13 @@
+{
+  "id": "BUG-007",
+  "date": "2026-04-23",
+  "title": "LLM 生成的 SQL 执行失败后无重试，直接返回错误",
+  "severity": "P1",
+  "classification": "B",
+  "spec": "SPEC-001",
+  "ac": ["AC-26"],
+  "root_cause": "QaPipeline.ask() 捕获 DuckDB 执行异常后直接返回错误，未将错误反馈给 LLM 修正",
+  "affected_files": ["app/llm.py", "app/pipeline.py", "docs/spec/SPEC-001-insight-analysis.md"],
+  "fix_summary": "新增 fix_sql 方法（多轮对话携带错误上下文）；执行块改为最多 2 次循环，首次失败时调用 fix_sql 修正 SQL 再重试",
+  "resolution": "full"
+}
